@@ -5,8 +5,8 @@
   "description": "Visual Arabic listening app",
   "main": "dist/src/main/main.js",
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "build": "tsc && node scripts/copy-static.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.renderer.json",
+    "build": "tsc && tsc -p tsconfig.renderer.json && node scripts/copy-static.mjs",
     "start": "npm run build && electron .",
     "test": "vitest run"
   },

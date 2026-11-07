@@ -18,28 +18,24 @@ interface UtteranceRow {
   end_ms: number;
 }
 
-function toSession(r: SessionRow): Session {
-  return {
-    id: r.id,
-    startedAt: r.started_at,
-    endedAt: r.ended_at,
-    status: r.status,
-    desktopTrackPath: r.desktop_track_path,
-  };
-}
+const toSession = (r: SessionRow): Session => ({
+  id: r.id,
+  startedAt: r.started_at,
+  endedAt: r.ended_at,
+  status: r.status,
+  desktopTrackPath: r.desktop_track_path,
+});
 
-function toUtterance(r: UtteranceRow): Utterance {
-  return {
-    id: r.id,
-    sessionId: r.session_id,
-    text: r.text,
-    translation: r.translation,
-    startMs: r.start_ms,
-    endMs: r.end_ms,
-  };
-}
+const toUtterance = (r: UtteranceRow): Utterance => ({
+  id: r.id,
+  sessionId: r.session_id,
+  text: r.text,
+  translation: r.translation,
+  startMs: r.start_ms,
+  endMs: r.end_ms,
+});
 
-/** Local SQLite storage for Sessions and Transcripts. */
+/** Local SQLite storage for Sessions and their Transcripts. */
 export class Store {
   private readonly db: DatabaseSync;
 
@@ -64,11 +60,33 @@ export class Store {
     `);
   }
 
-  createSession(startedAt: string, desktopTrackPath: string): Session {
-    const res = this.db
-      .prepare('INSERT INTO sessions (started_at, status, desktop_track_path) VALUES (?, ?, ?)')
-      .run(startedAt, 'recording', desktopTrackPath);
-    return this.getSession(Number(res.lastInsertRowid));
+  /** Creates a recording Session; desktopTrackPathFor derives its Desktop Track path from the new id. */
+  createSession(startedAt: string, desktopTrackPathFor: (id: number) => string): Session {
+    this.db.exec('BEGIN');
+    try {
+      const id = Number(
+        this.db
+          .prepare(
+            "INSERT INTO sessions (started_at, status, desktop_track_path) VALUES (?, 'recording', '')",
+          )
+          .run(startedAt).lastInsertRowid,
+      );
+      this.db
+        .prepare('UPDATE sessions SET desktop_track_path = ? WHERE id = ?')
+        .run(desktopTrackPathFor(id), id);
+      this.db.exec('COMMIT');
+      return this.getSession(id);
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /** Completes Sessions still marked recording, e.g. after the app was killed mid-Session. */
+  completeAbandonedSessions(endedAt: string): void {
+    this.db
+      .prepare("UPDATE sessions SET status = 'completed', ended_at = ? WHERE status = 'recording'")
+      .run(endedAt);
   }
 
   getSession(id: number): Session {
@@ -84,10 +102,6 @@ export class Store {
       .prepare("UPDATE sessions SET status = 'completed', ended_at = ? WHERE id = ?")
       .run(endedAt, id);
     return this.getSession(id);
-  }
-
-  setDesktopTrackPath(id: number, path: string): void {
-    this.db.prepare('UPDATE sessions SET desktop_track_path = ? WHERE id = ?').run(path, id);
   }
 
   listSessions(): Session[] {
