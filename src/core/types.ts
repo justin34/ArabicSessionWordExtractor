@@ -44,8 +44,31 @@ export interface LiveUtterance {
   translation: string;
   /** Tokens with timings and glosses; empty while interim. */
   tokens: Token[];
-  /** Why this final Utterance could not be translated; set only on the update reporting it. */
+  /** Why this final Utterance could not be translated; set from the update reporting it on. */
   translationError?: string;
+}
+
+/** Where a Lemma was heard: one Utterance of one Session. */
+export interface HeardIn {
+  sessionId: number;
+  utteranceId: number;
+}
+
+/** One Lemma in the Vocabulary (ADR 0001), with the surface forms it was heard as. */
+export interface VocabularyEntry {
+  lemmaId: number;
+  /** Dictionary form, diacritized as the analyzer gives it. */
+  lemma: string;
+  root: string | null;
+  partOfSpeech: string | null;
+  stemGloss: string | null;
+  /** Every surface form heard, in the order first heard. */
+  surfaceForms: string[];
+  firstHeardAt: string;
+  /** Times heard, across every Session. */
+  count: number;
+  /** Each Utterance it was heard in, oldest first; listed once however often it occurs there. */
+  heardIn: HeardIn[];
 }
 
 export type TranscriptListener = (sessionId: number, update: LiveUtterance) => void;

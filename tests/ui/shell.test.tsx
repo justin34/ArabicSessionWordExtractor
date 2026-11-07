@@ -21,7 +21,7 @@ describe('App shell', () => {
 
     await user.click(screen.getByRole('button', { name: 'Vocabulary' }));
     expect(screen.getByRole('heading', { name: 'Vocabulary' })).toBeTruthy();
-    expect(screen.getByText(/coming soon/i)).toBeTruthy();
+    expect(await screen.findByText('No words yet')).toBeTruthy();
     expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe('Vocabulary');
 
     await user.click(screen.getByRole('button', { name: 'Settings' }));

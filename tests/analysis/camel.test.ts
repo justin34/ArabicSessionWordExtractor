@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { alignToTokens } from '../../src/core/analysis/align';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../../src/core/analysis/camel';
 import type { TokenAnalysis } from '../../src/core/providers';
 
@@ -94,6 +95,15 @@ describe.skipIf(!built)('Arabic analysis by the CAMeL helper', () => {
 
     expect(results.map((r) => r.length)).toEqual([4, 4, 6]);
     expect(results[2]![1]).toMatchObject({ surface: 'العلم', lemma: 'عِلْم', root: 'ع.ل.م' });
+  });
+
+  it('matches its words to speech-to-text words that carry punctuation and numbers', async () => {
+    const heard = ['قال', 'المعلم:', '«اقرؤوا', 'الدرس»،', 'صفحة', '١٢.'];
+    const tokens = heard.map((surface, i) => ({ surface, startMs: i, endMs: i, gloss: '', lemmaId: null }));
+
+    const analyses = await analyzer.analyze(heard.join(' '));
+
+    expect(alignToTokens(analyses, tokens)).toEqual([0, 1, 2, 3, 4, 5]);
   });
 
   // MLE disambiguation in camel-tools picks each word's reading out of context

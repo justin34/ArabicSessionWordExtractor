@@ -1,8 +1,9 @@
 import { appendFileSync, createReadStream, mkdirSync, writeFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
+import { alignToTokens, cleanSurface, isWord } from './analysis/align';
 import { AudioChannel } from './audioChannel';
 import type { Providers } from './providers';
-import type { Store } from './store';
+import type { HeardWord, Store } from './store';
 import type { LiveUtterance, Session, Token, TranscriptListener, Utterance } from './types';
 
 interface LiveSession {
@@ -12,14 +13,24 @@ interface LiveSession {
   transcribing: boolean;
   /** Settles when the provider pipeline has drained. Never rejects. */
   transcribed: Promise<void>;
-  /** Sentence translations still in flight. Each settles, never rejects. */
-  translations: Set<Promise<void>>;
+  /** Translations and analyses of final Utterances still in flight. Each settles, never rejects. */
+  followUps: Set<Promise<void>>;
+}
+
+/** A final Utterance as last sent to Live View; its translation and analysis fill it in. */
+interface FinalUtterance {
+  sessionId: number;
+  utteranceId: number;
+  /** Wall-clock time the Utterance was final: when its words count as heard. */
+  heardAt: string;
+  current: LiveUtterance;
 }
 
 /**
  * The Session pipeline. Desktop audio streamed into a live Session is written to its
  * Desktop Track and, at the same time, fed to speech-to-text; each final Utterance is
- * stored in the Session's Transcript and shown at once, then translated alongside.
+ * stored in the Session's Transcript and shown at once, then translated and analyzed
+ * alongside. Analysis resolves its words to Lemmas, which go into the Vocabulary.
  */
 export class Sessions {
   private readonly live = new Map<number, LiveSession>();
@@ -46,7 +57,7 @@ export class Sessions {
       audio: new AudioChannel(),
       transcribing: true,
       transcribed: Promise.resolve(),
-      translations: new Set(),
+      followUps: new Set(),
     };
     this.live.set(session.id, live);
     live.transcribed = this.transcribe(session.id, live);
@@ -67,8 +78,8 @@ export class Sessions {
     this.live.delete(sessionId);
     live.audio.close();
     await live.transcribed;
-    // Translations started by the last Utterances finish before the Session completes.
-    while (live.translations.size > 0) await Promise.all(live.translations);
+    // Translations and analyses started by the last Utterances finish before the Session completes.
+    while (live.followUps.size > 0) await Promise.all(live.followUps);
     return this.store.completeSession(sessionId, new Date().toISOString());
   }
 
@@ -125,7 +136,7 @@ export class Sessions {
           continue;
         }
         utteranceIndex++;
-        // Glosses and Lemmas attach once Arabic analysis is wired in.
+        // Lemmas attach once the Utterance is analyzed; glosses with the dictionary.
         const tokens: Token[] = (event.words ?? []).map((w) => ({
           surface: w.text,
           startMs: w.startMs,
@@ -143,11 +154,17 @@ export class Sessions {
           tokens,
         });
         this.emit(sessionId, final);
-        // Translating does not hold up the next Utterance's speech-to-text.
-        const translating = this.translate(sessionId, utteranceId, final).finally(() =>
-          live.translations.delete(translating),
-        );
-        live.translations.add(translating);
+        const utterance: FinalUtterance = {
+          sessionId,
+          utteranceId,
+          heardAt: new Date().toISOString(),
+          current: final,
+        };
+        // Neither holds up the next Utterance's speech-to-text.
+        for (const work of [this.translate(utterance), this.analyze(utterance)]) {
+          const followUp = work.finally(() => live.followUps.delete(followUp));
+          live.followUps.add(followUp);
+        }
       }
     } catch (err) {
       // The Desktop Track is written independently; a provider failure must never lose audio.
@@ -158,17 +175,55 @@ export class Sessions {
     }
   }
 
+  /** Sends a final Utterance again with what has filled in since. */
+  private update(u: FinalUtterance, change: Partial<LiveUtterance>): void {
+    u.current = { ...u.current, ...change };
+    this.emit(u.sessionId, u.current);
+  }
+
   /** Adds the sentence translation to a final Utterance. A failure leaves it untranslated. */
-  private async translate(sessionId: number, utteranceId: number, final: LiveUtterance): Promise<void> {
+  private async translate(u: FinalUtterance): Promise<void> {
     try {
-      const translation = await this.providers.translator.translate(final.text);
+      const translation = await this.providers.translator.translate(u.current.text);
       if (!translation) return;
-      this.store.setTranslation(utteranceId, translation);
-      this.emit(sessionId, { ...final, translation });
+      this.store.setTranslation(u.utteranceId, translation);
+      this.update(u, { translation });
     } catch (err) {
-      console.error(`Translation failed for an Utterance in Session ${sessionId}:`, err);
+      console.error(`Translation failed for an Utterance in Session ${u.sessionId}:`, err);
       // The Arabic stays as it is; Live View warns that translation is not working.
-      this.emit(sessionId, { ...final, translationError: (err as Error).message || String(err) });
+      this.update(u, { translationError: (err as Error).message || String(err) });
+    }
+  }
+
+  /**
+   * Resolves a final Utterance's words to Lemmas and adds them to the Vocabulary. A
+   * failure leaves its words out of the Vocabulary and its Tokens without Lemmas.
+   */
+  private async analyze(u: FinalUtterance): Promise<void> {
+    try {
+      const analyses = (await this.providers.arabicAnalyzer.analyze(u.current.text)).filter((a) =>
+        isWord(a.surface),
+      );
+      if (analyses.length === 0) return;
+      const tokens = u.current.tokens;
+      const positions = alignToTokens(analyses, tokens);
+      const words: HeardWord[] = analyses.map((analysis, i) => ({
+        surface: cleanSurface(analysis.surface),
+        analysis,
+        tokenPosition: positions[i],
+      }));
+      const lemmaIds = this.store.recordHeardWords(u.utteranceId, u.heardAt, words);
+      // A Token covering several analyzed words takes the first one's Lemma.
+      const tokenLemmas = new Map<number, number>();
+      positions.forEach((p, i) => {
+        if (p !== null && !tokenLemmas.has(p)) tokenLemmas.set(p, lemmaIds[i]);
+      });
+      if (tokenLemmas.size === 0) return;
+      this.update(u, {
+        tokens: tokens.map((t, i) => ({ ...t, lemmaId: tokenLemmas.get(i) ?? t.lemmaId })),
+      });
+    } catch (err) {
+      console.error(`Arabic analysis failed for an Utterance in Session ${u.sessionId}:`, err);
     }
   }
 }

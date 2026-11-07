@@ -7,6 +7,7 @@ import type {
   ListedSession,
   LiveUtterance,
   Unsubscribe,
+  VocabularyEntry,
 } from './bridge';
 import { NoDesktopAudioError } from './bridge';
 import { EmptyState } from './components/EmptyState';
@@ -16,6 +17,7 @@ import { SessionList } from './components/SessionList';
 import { ScreenHeader } from './components/ScreenHeader';
 import { Sidebar, type Destination } from './components/Sidebar';
 import { StartPanel } from './components/StartPanel';
+import { VocabularyList } from './components/VocabularyList';
 import { isDemoKey, sessionKey } from './sessionKey';
 import { applyUpdate } from './transcript';
 import { useNow } from './useNow';
@@ -55,6 +57,8 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
   const [startPanelOpen, setStartPanelOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [vocabulary, setVocabulary] = useState<VocabularyEntry[] | null>(null);
+  const [vocabularyQuery, setVocabularyQuery] = useState('');
   const active = useRef<ActiveRecording | null>(null);
   const starting = useRef(false);
   const demoCancels = useRef(new Map<number, Unsubscribe>());
@@ -88,6 +92,20 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
     if (liveKey === null || isDemoKey(liveKey) || liveKey === String(activeId)) return;
     return bridge.subscribeTranscript(Number(liveKey), (u) => pushUpdate(liveKey, u));
   }, [bridge, liveKey, activeId, pushUpdate]);
+
+  // The Vocabulary grows while Sessions record, so reload it each time it is opened.
+  const onVocabulary = route.name === 'vocabulary';
+  useEffect(() => {
+    if (!onVocabulary) return;
+    let current = true;
+    bridge
+      .listVocabulary()
+      .then((list) => current && setVocabulary(list))
+      .catch((err: Error) => current && setNotice(`Could not load the Vocabulary: ${err.message}`));
+    return () => {
+      current = false;
+    };
+  }, [bridge, onVocabulary]);
 
   // Stop any demo feeds if the app unmounts.
   useEffect(() => {
@@ -260,12 +278,11 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
         )}
         {route.name === 'replay' && <ReplayPlaceholder onBack={goSessions} />}
         {route.name === 'vocabulary' && (
-          <>
-            <ScreenHeader title="Vocabulary" />
-            <EmptyState title="Vocabulary is coming soon">
-              Every word you hear will collect here.
-            </EmptyState>
-          </>
+          <VocabularyList
+            entries={vocabulary}
+            query={vocabularyQuery}
+            onQueryChange={setVocabularyQuery}
+          />
         )}
         {route.name === 'settings' && (
           <>

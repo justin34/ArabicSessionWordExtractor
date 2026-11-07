@@ -35,13 +35,19 @@ export class FakeTranslator implements Translator {
   }
 }
 
-/** Splits on whitespace and uses each surface form as its own Lemma. */
+/**
+ * Splits on whitespace and drops punctuation, like the real helper. Each word's Lemma
+ * comes from `lemmas`, keyed by surface form; any other word is its own Lemma.
+ */
 export class FakeArabicAnalyzer implements ArabicAnalyzer {
+  constructor(private readonly lemmas: Record<string, string> = {}) {}
+
   async analyze(sentence: string): Promise<TokenAnalysis[]> {
     return sentence
       .split(/\s+/)
+      .map((word) => word.replace(/[\p{P}\p{S}]/gu, ''))
       .filter(Boolean)
-      .map((surface) => ({ surface, lemma: surface }));
+      .map((surface) => ({ surface, lemma: this.lemmas[surface] ?? surface }));
   }
 }
 

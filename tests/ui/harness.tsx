@@ -8,7 +8,7 @@ import {
   type DesktopAudioCapture,
   type LiveUtterance,
 } from '../../src/renderer/bridge';
-import type { Session } from '../../src/core/types';
+import type { Session, VocabularyEntry } from '../../src/core/types';
 
 export function session(over: Partial<Session> & { id: number }): Session {
   return {
@@ -26,6 +26,7 @@ export class FakeBridge implements Bridge {
   calls: string[] = [];
   chunks: Array<{ sessionId: number; chunk: Uint8Array }> = [];
   appendError: Error | null = null;
+  vocabulary: VocabularyEntry[] = [];
   private listeners = new Map<number, (u: LiveUtterance) => void>();
   private nextId: number;
 
@@ -57,6 +58,9 @@ export class FakeBridge implements Bridge {
   }
   async listSessions() {
     return [...this.sessions].sort((a, b) => b.id - a.id);
+  }
+  async listVocabulary() {
+    return [...this.vocabulary];
   }
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void) {
     this.listeners.set(sessionId, onUpdate);

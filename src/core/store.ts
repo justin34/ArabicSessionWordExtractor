@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import type { Session, SessionStatus, Token, Utterance } from './types';
+import type { TokenAnalysis } from './providers';
+import type { HeardIn, Session, SessionStatus, Token, Utterance, VocabularyEntry } from './types';
 
 interface SessionRow {
   id: number;
@@ -31,6 +32,7 @@ interface TokenRow {
   surface: string;
   start_ms: number;
   end_ms: number;
+  lemma_id: number | null;
 }
 
 const toToken = (r: TokenRow): Token => ({
@@ -38,8 +40,27 @@ const toToken = (r: TokenRow): Token => ({
   startMs: r.start_ms,
   endMs: r.end_ms,
   gloss: '', // glosses are not stored yet
-  lemmaId: null, // nor Lemmas
+  lemmaId: r.lemma_id,
 });
+
+interface LemmaRow {
+  id: number;
+  lemma: string;
+  root: string | null;
+  part_of_speech: string | null;
+  stem_gloss: string | null;
+  first_heard_at: string;
+  count: number;
+}
+
+/** One analyzed word of a final Utterance, for the Vocabulary. */
+export interface HeardWord {
+  /** The surface form heard, without punctuation. */
+  surface: string;
+  analysis: TokenAnalysis;
+  /** Position of the Token it belongs to, or null when it matched none. */
+  tokenPosition: number | null;
+}
 
 const toUtterance = (r: UtteranceRow, tokens: Token[]): Utterance => ({
   id: r.id,
@@ -82,7 +103,36 @@ export class Store {
         end_ms INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS tokens_by_utterance ON tokens (utterance_id, position);
+      CREATE TABLE IF NOT EXISTS lemmas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lemma TEXT NOT NULL UNIQUE,
+        root TEXT,
+        part_of_speech TEXT,
+        stem_gloss TEXT,
+        first_heard_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS surface_forms (
+        lemma_id INTEGER NOT NULL REFERENCES lemmas(id),
+        surface TEXT NOT NULL,
+        first_heard_at TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        PRIMARY KEY (lemma_id, surface)
+      );
+      -- Each time a Lemma was heard: append-only, so the count is the number of rows.
+      CREATE TABLE IF NOT EXISTS occurrences (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lemma_id INTEGER NOT NULL REFERENCES lemmas(id),
+        utterance_id INTEGER NOT NULL REFERENCES utterances(id),
+        position INTEGER NOT NULL,
+        surface TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS occurrences_by_lemma ON occurrences (lemma_id, utterance_id);
     `);
+    // Databases made before the Vocabulary have Tokens without a Lemma column.
+    const tokenColumns = this.db.prepare('PRAGMA table_info(tokens)').all() as Array<{ name: string }>;
+    if (!tokenColumns.some((c) => c.name === 'lemma_id')) {
+      this.db.exec('ALTER TABLE tokens ADD COLUMN lemma_id INTEGER REFERENCES lemmas(id)');
+    }
   }
 
   /** Creates a recording Session; desktopTrackPathFor derives its Desktop Track path from the new id. */
@@ -160,6 +210,97 @@ export class Store {
   /** Sets a stored Utterance's sentence translation, which arrives after the Utterance. */
   setTranslation(utteranceId: number, translation: string): void {
     this.db.prepare('UPDATE utterances SET translation = ? WHERE id = ?').run(translation, utteranceId);
+  }
+
+  /**
+   * Adds an analyzed Utterance's words to the Vocabulary: a new Lemma is appended, a
+   * known one gains an occurrence and any new surface form. Links each matched Token to
+   * its Lemma. Returns the Lemma id per word.
+   */
+  recordHeardWords(utteranceId: number, heardAt: string, words: HeardWord[]): number[] {
+    const upsertLemma = this.db.prepare(
+      `INSERT INTO lemmas (lemma, root, part_of_speech, stem_gloss, first_heard_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (lemma) DO UPDATE SET
+         root = coalesce(root, excluded.root),
+         part_of_speech = coalesce(part_of_speech, excluded.part_of_speech),
+         stem_gloss = coalesce(stem_gloss, excluded.stem_gloss),
+         first_heard_at = min(first_heard_at, excluded.first_heard_at)
+       RETURNING id`,
+    );
+    const addSurface = this.db.prepare(
+      `INSERT INTO surface_forms (lemma_id, surface, first_heard_at, seq)
+       VALUES (?, ?, ?, (SELECT count(*) FROM surface_forms WHERE lemma_id = ?))
+       ON CONFLICT (lemma_id, surface) DO UPDATE SET
+         first_heard_at = min(first_heard_at, excluded.first_heard_at)`,
+    );
+    const addOccurrence = this.db.prepare(
+      'INSERT INTO occurrences (lemma_id, utterance_id, position, surface) VALUES (?, ?, ?, ?)',
+    );
+    const linkToken = this.db.prepare(
+      'UPDATE tokens SET lemma_id = ? WHERE utterance_id = ? AND position = ? AND lemma_id IS NULL',
+    );
+    this.db.exec('BEGIN');
+    try {
+      const ids = words.map((w, position) => {
+        const a = w.analysis;
+        const row = upsertLemma.get(
+          a.lemma,
+          a.root ?? null,
+          a.partOfSpeech ?? null,
+          a.stemGloss ?? null,
+          heardAt,
+        ) as { id: number };
+        addSurface.run(row.id, w.surface, heardAt, row.id);
+        addOccurrence.run(row.id, utteranceId, position, w.surface);
+        if (w.tokenPosition !== null) linkToken.run(row.id, utteranceId, w.tokenPosition);
+        return row.id;
+      });
+      this.db.exec('COMMIT');
+      return ids;
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /** The whole Vocabulary, most recently first heard first. */
+  listVocabulary(): VocabularyEntry[] {
+    const lemmas = this.db
+      .prepare(
+        `SELECT l.*, (SELECT count(*) FROM occurrences o WHERE o.lemma_id = l.id) AS count
+         FROM lemmas l ORDER BY l.first_heard_at DESC, l.id DESC`,
+      )
+      .all() as unknown as LemmaRow[];
+    const forms = new Map<number, string[]>();
+    const formRows = this.db
+      .prepare('SELECT lemma_id, surface FROM surface_forms ORDER BY lemma_id, first_heard_at, seq')
+      .all() as unknown as Array<{ lemma_id: number; surface: string }>;
+    for (const r of formRows) forms.set(r.lemma_id, [...(forms.get(r.lemma_id) ?? []), r.surface]);
+    const heardIn = new Map<number, HeardIn[]>();
+    const heardRows = this.db
+      .prepare(
+        `SELECT DISTINCT o.lemma_id, u.session_id, o.utterance_id
+         FROM occurrences o JOIN utterances u ON u.id = o.utterance_id
+         ORDER BY o.lemma_id, o.utterance_id`,
+      )
+      .all() as unknown as Array<{ lemma_id: number; session_id: number; utterance_id: number }>;
+    for (const r of heardRows) {
+      const list = heardIn.get(r.lemma_id) ?? [];
+      list.push({ sessionId: r.session_id, utteranceId: r.utterance_id });
+      heardIn.set(r.lemma_id, list);
+    }
+    return lemmas.map((l) => ({
+      lemmaId: l.id,
+      lemma: l.lemma,
+      root: l.root,
+      partOfSpeech: l.part_of_speech,
+      stemGloss: l.stem_gloss,
+      surfaceForms: forms.get(l.id) ?? [],
+      firstHeardAt: l.first_heard_at,
+      count: l.count,
+      heardIn: heardIn.get(l.id) ?? [],
+    }));
   }
 
   getTranscript(sessionId: number): Utterance[] {
