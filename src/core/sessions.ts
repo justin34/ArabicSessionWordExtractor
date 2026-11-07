@@ -3,11 +3,13 @@ import { extname, join } from 'node:path';
 import { AudioChannel } from './audioChannel';
 import type { Providers } from './providers';
 import type { Store } from './store';
-import type { Session, Utterance } from './types';
+import type { LiveUtterance, Session, Token, TranscriptListener, Utterance } from './types';
 
 interface LiveSession {
   desktopTrackPath: string;
   audio: AudioChannel;
+  /** False once speech-to-text has failed; audio then goes to the Desktop Track only. */
+  transcribing: boolean;
   /** Settles when the provider pipeline has drained. Never rejects. */
   transcribed: Promise<void>;
 }
@@ -19,6 +21,7 @@ interface LiveSession {
  */
 export class Sessions {
   private readonly live = new Map<number, LiveSession>();
+  private readonly listeners = new Set<TranscriptListener>();
 
   constructor(
     private readonly store: Store,
@@ -36,12 +39,14 @@ export class Sessions {
       join(this.recordingsDir, `session-${id}-desktop.${extension}`),
     );
     writeFileSync(session.desktopTrackPath, new Uint8Array());
-    const audio = new AudioChannel();
-    this.live.set(session.id, {
+    const live: LiveSession = {
       desktopTrackPath: session.desktopTrackPath,
-      audio,
-      transcribed: this.transcribe(session.id, audio),
-    });
+      audio: new AudioChannel(),
+      transcribing: true,
+      transcribed: Promise.resolve(),
+    };
+    this.live.set(session.id, live);
+    live.transcribed = this.transcribe(session.id, live);
     return session;
   }
 
@@ -49,7 +54,7 @@ export class Sessions {
     const live = this.live.get(sessionId);
     if (!live) throw new Error(`Session ${sessionId} is not recording`);
     appendFileSync(live.desktopTrackPath, chunk);
-    live.audio.push(chunk);
+    if (live.transcribing) live.audio.push(chunk);
   }
 
   /** Ends the recording, waits for the Transcript to be finished, and completes the Session. */
@@ -80,6 +85,12 @@ export class Sessions {
     return this.store.getSession(id);
   }
 
+  /** Receives every live Transcript update, for every recording Session. */
+  subscribe(listener: TranscriptListener): () => void {
+    this.listeners.add(listener);
+    return () => void this.listeners.delete(listener);
+  }
+
   list(): Session[] {
     return this.store.listSessions();
   }
@@ -88,22 +99,52 @@ export class Sessions {
     return this.store.getTranscript(sessionId);
   }
 
-  private async transcribe(sessionId: number, audio: AudioChannel): Promise<void> {
+  private emit(sessionId: number, update: LiveUtterance): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(sessionId, update);
+      } catch (err) {
+        console.error('Transcript listener failed:', err);
+      }
+    }
+  }
+
+  private async transcribe(sessionId: number, live: LiveSession): Promise<void> {
+    // Interim text and the final Utterance it becomes share one live id.
+    let utteranceIndex = 0;
     try {
-      for await (const event of this.providers.speechToText.transcribe(audio)) {
-        if (event.type !== 'final') continue;
+      for await (const event of this.providers.speechToText.transcribe(live.audio)) {
+        const id = String(utteranceIndex);
+        if (event.type === 'interim') {
+          this.emit(sessionId, { id, isFinal: false, text: event.text, translation: '', tokens: [] });
+          continue;
+        }
+        utteranceIndex++;
         const translation = await this.providers.translator.translate(event.text);
+        // Glosses and Lemmas attach once Arabic analysis is wired in.
+        const tokens: Token[] = (event.words ?? []).map((w) => ({
+          surface: w.text,
+          startMs: w.startMs,
+          endMs: w.endMs,
+          gloss: '',
+          lemmaId: null,
+        }));
         this.store.addUtterance({
           sessionId,
           text: event.text,
           translation,
           startMs: event.startMs,
           endMs: event.endMs,
+          tokens,
         });
+        this.emit(sessionId, { id, isFinal: true, text: event.text, translation, tokens });
       }
     } catch (err) {
       // The Desktop Track is written independently; a provider failure must never lose audio.
       console.error(`Transcription failed for Session ${sessionId}:`, err);
+    } finally {
+      // Nothing reads the channel any more, so stop queueing audio into it.
+      live.transcribing = false;
     }
   }
 }

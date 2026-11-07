@@ -187,10 +187,38 @@ describe('Live View for a real Session', () => {
     await user.click(await screen.findByRole('button', { name: /open session/i }));
 
     expect(screen.getByText('Listening…')).toBeTruthy();
-    expect(screen.getByText(/once speech-to-text is connected/i)).toBeTruthy();
+    expect(screen.getByText(/as it is spoken/i)).toBeTruthy();
 
     act(() => bridge.emit(7, final('a', [['سلام', 'peace']], 'Peace.')));
     expect(screen.getByText('Peace.')).toBeTruthy();
     expect(screen.queryByText('Listening…')).toBeNull();
   });
+
+  it("keeps the recording Session's transcript while the learner is on the Session List", async () => {
+    const user = userEvent.setup();
+    const { bridge } = renderApp();
+    await user.click(await screen.findByRole('button', { name: 'Start Session' }));
+    await user.click(screen.getByRole('button', { name: 'Start' }));
+    await user.click(await screen.findByRole('button', { name: /back to sessions/i }));
+
+    act(() => bridge.emit(1, interim('a', 'مرحبا')));
+    act(() => bridge.emit(1, final('a', [['مرحبا', 'hello']], 'Hello.')));
+    await user.click(screen.getByRole('button', { name: /open session/i }));
+
+    expect(screen.getByText('Hello.')).toBeTruthy();
+    expect(screen.getAllByRole('article')).toHaveLength(1);
+  });
+
+  it('shows a final Utterance whose words have no glosses yet as plain right-to-left Arabic', async () => {
+    const { demo } = await enterDemoLiveView();
+    act(() => demo.emit(final('u1', [['مرحبا', ''], ['بكم', '']], '')));
+
+    const utterance = screen.getByRole('article');
+    expect(utterance.getAttribute('data-state')).toBe('final');
+    expect(within(utterance).queryAllByRole('group')).toHaveLength(0);
+    const text = within(utterance).getByText('مرحبا بكم');
+    expect(text.getAttribute('dir')).toBe('rtl');
+    expect(text.getAttribute('lang')).toBe('ar');
+  });
 });
+

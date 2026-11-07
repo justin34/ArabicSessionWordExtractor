@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import type { Session, SessionStatus, Utterance } from './types';
+import type { Session, SessionStatus, Token, Utterance } from './types';
 
 interface SessionRow {
   id: number;
@@ -26,14 +26,29 @@ const toSession = (r: SessionRow): Session => ({
   desktopTrackPath: r.desktop_track_path,
 });
 
-const toUtterance = (r: UtteranceRow): Utterance => ({
+interface TokenRow {
+  utterance_id: number;
+  surface: string;
+  start_ms: number;
+  end_ms: number;
+}
+
+const toToken = (r: TokenRow): Token => ({
+  surface: r.surface,
+  startMs: r.start_ms,
+  endMs: r.end_ms,
+  gloss: '', // glosses are not stored yet
+  lemmaId: null, // nor Lemmas
+});
+
+const toUtterance = (r: UtteranceRow, tokens: Token[]): Utterance => ({
   id: r.id,
   sessionId: r.session_id,
   text: r.text,
   translation: r.translation,
   startMs: r.start_ms,
   endMs: r.end_ms,
-  tokens: [], // Tokens are not persisted yet
+  tokens,
 });
 
 /** Local SQLite storage for Sessions and their Transcripts. */
@@ -58,6 +73,15 @@ export class Store {
         start_ms INTEGER NOT NULL,
         end_ms INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        utterance_id INTEGER NOT NULL REFERENCES utterances(id),
+        position INTEGER NOT NULL,
+        surface TEXT NOT NULL,
+        start_ms INTEGER NOT NULL,
+        end_ms INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS tokens_by_utterance ON tokens (utterance_id, position);
     `);
   }
 
@@ -112,19 +136,43 @@ export class Store {
     return rows.map(toSession);
   }
 
-  addUtterance(u: Omit<Utterance, 'id' | 'tokens'>): void {
-    this.db
-      .prepare(
-        'INSERT INTO utterances (session_id, text, translation, start_ms, end_ms) VALUES (?, ?, ?, ?, ?)',
-      )
-      .run(u.sessionId, u.text, u.translation, u.startMs, u.endMs);
+  /** Stores a final Utterance and its Tokens together. */
+  addUtterance(u: Omit<Utterance, 'id'>): void {
+    this.db.exec('BEGIN');
+    try {
+      const id = this.db
+        .prepare(
+          'INSERT INTO utterances (session_id, text, translation, start_ms, end_ms) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(u.sessionId, u.text, u.translation, u.startMs, u.endMs).lastInsertRowid;
+      const insertToken = this.db.prepare(
+        'INSERT INTO tokens (utterance_id, position, surface, start_ms, end_ms) VALUES (?, ?, ?, ?, ?)',
+      );
+      u.tokens.forEach((t, i) => insertToken.run(id, i, t.surface, t.startMs, t.endMs));
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   getTranscript(sessionId: number): Utterance[] {
     const rows = this.db
       .prepare('SELECT * FROM utterances WHERE session_id = ? ORDER BY start_ms, id')
       .all(sessionId) as unknown as UtteranceRow[];
-    return rows.map(toUtterance);
+    const tokenRows = this.db
+      .prepare(
+        `SELECT t.* FROM tokens t JOIN utterances u ON u.id = t.utterance_id
+         WHERE u.session_id = ? ORDER BY t.utterance_id, t.position`,
+      )
+      .all(sessionId) as unknown as TokenRow[];
+    const byUtterance = new Map<number, Token[]>();
+    for (const r of tokenRows) {
+      const list = byUtterance.get(r.utterance_id) ?? [];
+      list.push(toToken(r));
+      byUtterance.set(r.utterance_id, list);
+    }
+    return rows.map((r) => toUtterance(r, byUtterance.get(r.id) ?? []));
   }
 
   close(): void {

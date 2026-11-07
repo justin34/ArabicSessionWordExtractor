@@ -9,7 +9,10 @@ function ArabicText({ text }: { text: string }) {
   );
 }
 
-/** One Utterance: muted Arabic while interim, word columns plus translation once final. */
+/**
+ * One Utterance: muted Arabic while interim; once final, word columns with their glosses
+ * (plain Arabic until glosses exist) plus the sentence translation.
+ */
 export function UtteranceView({ utterance }: { utterance: LiveUtterance }) {
   if (!utterance.isFinal) {
     return (
@@ -20,7 +23,7 @@ export function UtteranceView({ utterance }: { utterance: LiveUtterance }) {
   }
   return (
     <article className="utterance" data-state="final">
-      {utterance.tokens.length > 0 ? (
+      {utterance.tokens.some((t) => t.gloss) ? (
         <div className="utterance__words" dir="rtl">
           {utterance.tokens.map((t, i) => (
             <span key={i} className="word" role="group">

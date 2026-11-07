@@ -29,3 +29,21 @@ export interface Utterance {
   /** Empty while the Utterance is interim, and until the real pipeline produces Tokens. */
   tokens: Token[];
 }
+
+/**
+ * A Transcript update streamed to Live View while a Session records. Interim text is
+ * re-sent under the same id until that Utterance is final; then it carries its
+ * translation and Tokens.
+ */
+export interface LiveUtterance {
+  id: string;
+  isFinal: boolean;
+  /** Arabic text (all the learner sees while interim). */
+  text: string;
+  /** Sentence translation; empty while interim. */
+  translation: string;
+  /** Tokens with timings and glosses; empty while interim. */
+  tokens: Token[];
+}
+
+export type TranscriptListener = (sessionId: number, update: LiveUtterance) => void;

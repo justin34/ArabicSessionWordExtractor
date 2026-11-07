@@ -10,6 +10,7 @@ import {
   FakeTranslator,
 } from '../src/core/fakes';
 import type { Providers, SttEvent } from '../src/core/providers';
+import type { LiveUtterance } from '../src/core/types';
 
 const script: SttEvent[] = [
   { type: 'interim', text: 'مر', startMs: 0, endMs: 300 },
@@ -139,6 +140,79 @@ describe('Live Session', () => {
 
     expect(done.status).toBe('completed');
     expect([...readFileSync(done.desktopTrackPath)]).toEqual([4, 5]);
+  });
+});
+
+describe('Word timings', () => {
+  const timed: SttEvent[] = [
+    { type: 'interim', text: 'مرحبا', startMs: 0, endMs: 500, words: [] },
+    {
+      type: 'final',
+      text: 'مرحبا بكم',
+      startMs: 0,
+      endMs: 1200,
+      words: [
+        { text: 'مرحبا', startMs: 0, endMs: 600 },
+        { text: 'بكم', startMs: 700, endMs: 1200 },
+      ],
+    },
+  ];
+  const tokens = [
+    { surface: 'مرحبا', startMs: 0, endMs: 600, gloss: '', lemmaId: null },
+    { surface: 'بكم', startMs: 700, endMs: 1200, gloss: '', lemmaId: null },
+  ];
+
+  it('stores each final word as a Token with its timing, kept across a restart', async () => {
+    const sessions = open(fakeProviders({ speechToText: new FakeSpeechToText(timed) })).sessions;
+    const s = await sessions.processRecording(recordedFile([1]));
+    app?.close();
+
+    expect(open().sessions.transcript(s.id)).toEqual([
+      expect.objectContaining({ text: 'مرحبا بكم', tokens }),
+    ]);
+  });
+
+  it('sends the final update with its timed Tokens, and the interim one without', async () => {
+    const sessions = open(fakeProviders({ speechToText: new FakeSpeechToText(timed) })).sessions;
+    const updates: LiveUtterance[] = [];
+    sessions.subscribe((_id, u) => updates.push(u));
+
+    await sessions.processRecording(recordedFile([1]));
+
+    expect(updates.map((u) => u.tokens)).toEqual([[], tokens]);
+  });
+});
+
+describe('Live transcript updates', () => {
+  it('streams interim text that becomes final under the same id, translated', async () => {
+    const sessions = open().sessions;
+    const updates: Array<{ sessionId: number; update: LiveUtterance }> = [];
+    sessions.subscribe((sessionId, update) => updates.push({ sessionId, update }));
+
+    const s = sessions.start();
+    sessions.appendDesktopAudio(s.id, new Uint8Array([1]));
+    await sessions.stop(s.id);
+
+    expect(updates.map((u) => u.sessionId)).toEqual([s.id, s.id, s.id, s.id]);
+    const [a, b, c, d] = updates.map((u) => u.update);
+    expect(a).toMatchObject({ isFinal: false, text: 'مر', translation: '' });
+    expect(b).toMatchObject({ isFinal: true, text: 'مرحبا بكم', translation: 'Welcome' });
+    expect(c).toMatchObject({ isFinal: false, text: 'كيف' });
+    expect(d).toMatchObject({ isFinal: true, text: 'كيف حالكم', translation: 'How are you all' });
+    expect(b.id).toBe(a.id);
+    expect(d.id).toBe(c.id);
+    expect(c.id).not.toBe(a.id);
+  });
+
+  it('stops sending updates once unsubscribed', async () => {
+    const sessions = open().sessions;
+    const updates: LiveUtterance[] = [];
+    const unsubscribe = sessions.subscribe((_id, u) => updates.push(u));
+    unsubscribe();
+
+    await sessions.stop(sessions.start().id);
+
+    expect(updates).toEqual([]);
   });
 });
 
