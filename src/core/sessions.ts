@@ -2,7 +2,8 @@ import { appendFileSync, createReadStream, mkdirSync, writeFileSync } from 'node
 import { extname, join } from 'node:path';
 import { alignToTokens, cleanSurface, isWord } from './analysis/align';
 import { AudioChannel } from './audioChannel';
-import type { Providers } from './providers';
+import { quickGloss } from './dictionary/gloss';
+import type { DictionaryEntry, Providers, TokenAnalysis } from './providers';
 import type { HeardWord, Store } from './store';
 import type { LiveUtterance, Session, Token, TranscriptListener, Utterance } from './types';
 
@@ -213,17 +214,47 @@ export class Sessions {
         tokenPosition: positions[i],
       }));
       const lemmaIds = this.store.recordHeardWords(u.utteranceId, u.heardAt, words);
-      // A Token covering several analyzed words takes the first one's Lemma.
+      // A Token covering several analyzed words takes the first one's Lemma and gloss.
       const tokenLemmas = new Map<number, number>();
+      const tokenAnalyses = new Map<number, TokenAnalysis>();
       positions.forEach((p, i) => {
-        if (p !== null && !tokenLemmas.has(p)) tokenLemmas.set(p, lemmaIds[i]);
+        if (p === null || tokenLemmas.has(p)) return;
+        tokenLemmas.set(p, lemmaIds[i]);
+        tokenAnalyses.set(p, analyses[i]);
       });
       if (tokenLemmas.size === 0) return;
+      const glosses = await this.glosses(u, tokenAnalyses);
+      this.store.setTokenGlosses(u.utteranceId, glosses);
       this.update(u, {
-        tokens: tokens.map((t, i) => ({ ...t, lemmaId: tokenLemmas.get(i) ?? t.lemmaId })),
+        tokens: tokens.map((t, i) => ({
+          ...t,
+          lemmaId: tokenLemmas.get(i) ?? t.lemmaId,
+          gloss: glosses.get(i) ?? t.gloss,
+        })),
       });
     } catch (err) {
       console.error(`Arabic analysis failed for an Utterance in Session ${u.sessionId}:`, err);
     }
+  }
+
+  /**
+   * The quick gloss per Token position: the dictionary's first sense of its Lemma, else
+   * the analyzer's stem gloss. A failed lookup falls back the same way.
+   */
+  private async glosses(u: FinalUtterance, byToken: Map<number, TokenAnalysis>): Promise<Map<number, string>> {
+    const glosses = new Map<number, string>();
+    await Promise.all(
+      [...byToken].map(async ([position, a]) => {
+        let entry: DictionaryEntry | undefined;
+        try {
+          entry = await this.providers.dictionary.lookup(a.lemma, a.partOfSpeech);
+        } catch (err) {
+          console.error(`Dictionary lookup failed for a word in Session ${u.sessionId}:`, err);
+        }
+        const gloss = quickGloss(entry, a.stemGloss, a.partOfSpeech);
+        if (gloss) glosses.set(position, gloss);
+      }),
+    );
+    return glosses;
   }
 }

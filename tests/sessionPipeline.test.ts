@@ -9,7 +9,7 @@ import {
   FakeSpeechToText,
   FakeTranslator,
 } from '../src/core/fakes';
-import type { ArabicAnalyzer, Providers, SttEvent, Translator } from '../src/core/providers';
+import type { ArabicAnalyzer, Dictionary, Providers, SttEvent, Translator } from '../src/core/providers';
 import type { LiveUtterance } from '../src/core/types';
 
 const script: SttEvent[] = [
@@ -446,6 +446,60 @@ describe('Vocabulary', () => {
 
   it('is empty before anything is heard', () => {
     expect(open().vocabulary.list()).toEqual([]);
+  });
+});
+
+describe('Quick gloss', () => {
+  const once: SttEvent[] = [
+    {
+      type: 'final',
+      text: 'كتب الطالب',
+      startMs: 0,
+      endMs: 900,
+      words: [
+        { text: 'كتب', startMs: 0, endMs: 400 },
+        { text: 'الطالب', startMs: 500, endMs: 900 },
+      ],
+    },
+  ];
+  const analyzer: ArabicAnalyzer = {
+    analyze: async () => [
+      { surface: 'كتب', lemma: 'كَتَب', partOfSpeech: 'verb', stemGloss: 'write;inscribe' },
+      { surface: 'الطالب', lemma: 'طالِب', partOfSpeech: 'noun', stemGloss: 'student' },
+    ],
+  };
+  const dictionary: Dictionary = {
+    lookup: async (lemma, pos) =>
+      lemma === 'كَتَب' && pos === 'verb'
+        ? { lemma, definitions: ['to mark (letters) on a surface, to write, to inscribe'] }
+        : undefined,
+  };
+  const providers = (overrides: Partial<Providers> = {}) =>
+    fakeProviders({ speechToText: new FakeSpeechToText(once), arabicAnalyzer: analyzer, dictionary, ...overrides });
+
+  it("glosses each word from the dictionary's first sense, else the stem gloss, in Live View and stored", async () => {
+    const sessions = open(providers()).sessions;
+    const updates: LiveUtterance[] = [];
+    sessions.subscribe((_id, u) => updates.push(u));
+
+    const s = await sessions.processRecording(recordedFile([1]));
+
+    expect(updates[0].tokens.map((t) => t.gloss)).toEqual(['', '']);
+    expect(updates.at(-1)!.tokens.map((t) => t.gloss)).toEqual(['to write', 'student']);
+    app?.close();
+    expect(open().sessions.transcript(s.id)[0].tokens.map((t) => t.gloss)).toEqual(['to write', 'student']);
+  });
+
+  it('a failed dictionary lookup falls back to the stem gloss', async () => {
+    const broken: Dictionary = { lookup: () => Promise.reject(new Error('dictionary missing')) };
+    const sessions = open(providers({ dictionary: broken })).sessions;
+
+    const s = await sessions.processRecording(recordedFile([1]));
+
+    expect(sessions.transcript(s.id)[0].tokens.map((t) => [t.gloss, t.lemmaId !== null])).toEqual([
+      ['write', true],
+      ['student', true],
+    ]);
   });
 });
 

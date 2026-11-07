@@ -64,12 +64,20 @@ export interface ArabicAnalyzer {
 
 export interface DictionaryEntry {
   lemma: string;
+  /** The dictionary's own diacritized headword, when it has one. */
+  headword?: string;
+  /** The dictionary's part of speech, when it has one. */
+  partOfSpeech?: string;
+  /** Senses, most common first. */
   definitions: string[];
 }
 
-/** Dictionary: dictionary form (Lemma) in, definitions out. */
+/**
+ * Dictionary: dictionary form (Lemma) in, definitions out. The analyzer's part of speech,
+ * when given, helps pick between entries spelled alike.
+ */
 export interface Dictionary {
-  lookup(lemma: string): Promise<DictionaryEntry | undefined>;
+  lookup(lemma: string, partOfSpeech?: string): Promise<DictionaryEntry | undefined>;
 }
 
 export interface Providers {
