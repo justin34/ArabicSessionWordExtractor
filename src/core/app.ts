@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { isArabicWord } from './analysis/align';
 import { WordDetailsBuilder, type DetailModuleConfig } from './details/wordDetails';
 import { StudyGuides } from './guides/studyGuides';
 import type { Providers } from './providers';
@@ -46,6 +47,8 @@ export interface AppOptions {
 export function createApp({ dataDir, providers, detailModules }: AppOptions): App {
   mkdirSync(dataDir, { recursive: true });
   const store = new Store(join(dataDir, 'app.db'));
+  // Foreign words stored before they were kept out of the Vocabulary leave it now.
+  store.removeForeignWords(isArabicWord);
   const builder = new WordDetailsBuilder(store, { store, dictionary: providers.dictionary }, detailModules);
   const studyGuides = new StudyGuides(store, builder);
   const sessions = new Sessions(store, providers, join(dataDir, 'recordings'), studyGuides);
