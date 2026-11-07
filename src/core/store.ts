@@ -54,6 +54,44 @@ interface LemmaRow {
   count: number;
 }
 
+/** A surface form of a Lemma, with how its chosen reading is said. */
+export interface HeardForm {
+  surface: string;
+  diacritized: string | null;
+  /** Phonetic transcription of the diacritized form. */
+  pronunciation: string | null;
+}
+
+/** Everything stored about one Lemma, for the Detail Modules. */
+export interface LemmaRecord {
+  id: number;
+  lemma: string;
+  root: string | null;
+  partOfSpeech: string | null;
+  pattern: string | null;
+  stemGloss: string | null;
+  firstHeardAt: string;
+  count: number;
+  /** In the order first heard. */
+  forms: HeardForm[];
+}
+
+/** An Utterance a Lemma was heard in. */
+export interface HeardUtterance {
+  utteranceId: number;
+  sessionId: number;
+  sessionStartedAt: string;
+  text: string;
+  translation: string;
+}
+
+/** A Session a Lemma was heard in, and how often. */
+export interface HeardSession {
+  sessionId: number;
+  startedAt: string;
+  count: number;
+}
+
 /** One analyzed word of a final Utterance, for the Vocabulary. */
 export interface HeardWord {
   /** The surface form heard, without punctuation. */
@@ -138,6 +176,15 @@ export class Store {
     if (!tokenColumns.some((c) => c.name === 'gloss')) {
       this.db.exec("ALTER TABLE tokens ADD COLUMN gloss TEXT NOT NULL DEFAULT ''");
     }
+    // ... and before the word panel, without a Lemma's pattern or a form's pronunciation.
+    this.addColumnIfMissing('lemmas', 'pattern', 'TEXT');
+    this.addColumnIfMissing('surface_forms', 'diacritized', 'TEXT');
+    this.addColumnIfMissing('surface_forms', 'pronunciation', 'TEXT');
+  }
+
+  private addColumnIfMissing(table: string, column: string, type: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 
   /** Creates a recording Session; desktopTrackPathFor derives its Desktop Track path from the new id. */
@@ -237,20 +284,23 @@ export class Store {
    */
   recordHeardWords(utteranceId: number, heardAt: string, words: HeardWord[]): number[] {
     const upsertLemma = this.db.prepare(
-      `INSERT INTO lemmas (lemma, root, part_of_speech, stem_gloss, first_heard_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO lemmas (lemma, root, part_of_speech, stem_gloss, pattern, first_heard_at)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (lemma) DO UPDATE SET
          root = coalesce(root, excluded.root),
          part_of_speech = coalesce(part_of_speech, excluded.part_of_speech),
          stem_gloss = coalesce(stem_gloss, excluded.stem_gloss),
+         pattern = coalesce(pattern, excluded.pattern),
          first_heard_at = min(first_heard_at, excluded.first_heard_at)
        RETURNING id`,
     );
     const addSurface = this.db.prepare(
-      `INSERT INTO surface_forms (lemma_id, surface, first_heard_at, seq)
-       VALUES (?, ?, ?, (SELECT count(*) FROM surface_forms WHERE lemma_id = ?))
+      `INSERT INTO surface_forms (lemma_id, surface, first_heard_at, seq, diacritized, pronunciation)
+       VALUES (?, ?, ?, (SELECT count(*) FROM surface_forms WHERE lemma_id = ?), ?, ?)
        ON CONFLICT (lemma_id, surface) DO UPDATE SET
-         first_heard_at = min(first_heard_at, excluded.first_heard_at)`,
+         first_heard_at = min(first_heard_at, excluded.first_heard_at),
+         diacritized = coalesce(diacritized, excluded.diacritized),
+         pronunciation = coalesce(pronunciation, excluded.pronunciation)`,
     );
     const addOccurrence = this.db.prepare(
       'INSERT INTO occurrences (lemma_id, utterance_id, position, surface) VALUES (?, ?, ?, ?)',
@@ -267,9 +317,10 @@ export class Store {
           a.root ?? null,
           a.partOfSpeech ?? null,
           a.stemGloss ?? null,
+          a.pattern ?? null,
           heardAt,
         ) as { id: number };
-        addSurface.run(row.id, w.surface, heardAt, row.id);
+        addSurface.run(row.id, w.surface, heardAt, row.id, a.diacritized ?? null, a.pronunciation ?? null);
         addOccurrence.run(row.id, utteranceId, position, w.surface);
         if (w.tokenPosition !== null) linkToken.run(row.id, utteranceId, w.tokenPosition);
         return row.id;
@@ -319,6 +370,62 @@ export class Store {
       count: l.count,
       heardIn: heardIn.get(l.id) ?? [],
     }));
+  }
+
+  /** One Lemma of the Vocabulary, or undefined for an id that is none. */
+  getLemma(lemmaId: number): LemmaRecord | undefined {
+    const l = this.db
+      .prepare(
+        `SELECT l.*, (SELECT count(*) FROM occurrences o WHERE o.lemma_id = l.id) AS count
+         FROM lemmas l WHERE l.id = ?`,
+      )
+      .get(lemmaId) as unknown as (LemmaRow & { pattern: string | null }) | undefined;
+    if (!l) return undefined;
+    const forms = this.db
+      .prepare(
+        `SELECT surface, diacritized, pronunciation FROM surface_forms
+         WHERE lemma_id = ? ORDER BY first_heard_at, seq`,
+      )
+      .all(lemmaId) as unknown as HeardForm[];
+    return {
+      id: l.id,
+      lemma: l.lemma,
+      root: l.root,
+      partOfSpeech: l.part_of_speech,
+      pattern: l.pattern,
+      stemGloss: l.stem_gloss,
+      firstHeardAt: l.first_heard_at,
+      count: l.count,
+      forms: forms.map((f) => ({ ...f })),
+    };
+  }
+
+  /** The Utterances a Lemma was heard in, most recent first, at most `limit`. */
+  lemmaUtterances(lemmaId: number, limit: number): HeardUtterance[] {
+    return this.db
+      .prepare(
+        `SELECT u.id AS utteranceId, u.session_id AS sessionId, s.started_at AS sessionStartedAt,
+                u.text, u.translation
+         FROM utterances u JOIN sessions s ON s.id = u.session_id
+         WHERE u.id IN (SELECT utterance_id FROM occurrences WHERE lemma_id = ?)
+         ORDER BY s.started_at DESC, u.session_id DESC, u.start_ms DESC, u.id DESC
+         LIMIT ?`,
+      )
+      .all(lemmaId, limit)
+      .map((r) => ({ ...r })) as unknown as HeardUtterance[];
+  }
+
+  /** The Sessions a Lemma was heard in, most recent first, with times heard in each. */
+  lemmaSessions(lemmaId: number): HeardSession[] {
+    return this.db
+      .prepare(
+        `SELECT s.id AS sessionId, s.started_at AS startedAt, count(*) AS count
+         FROM occurrences o JOIN utterances u ON u.id = o.utterance_id JOIN sessions s ON s.id = u.session_id
+         WHERE o.lemma_id = ?
+         GROUP BY s.id ORDER BY s.started_at DESC, s.id DESC`,
+      )
+      .all(lemmaId)
+      .map((r) => ({ ...r })) as unknown as HeardSession[];
   }
 
   getTranscript(sessionId: number): Utterance[] {

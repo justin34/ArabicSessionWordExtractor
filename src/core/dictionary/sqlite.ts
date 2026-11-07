@@ -1,11 +1,12 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import type { Dictionary, DictionaryEntry } from '../providers';
+import type { Dictionary, DictionaryEntry, ExampleSentence } from '../providers';
 import { bareKey, SCHEMA_VERSION } from './data';
 
 interface EntryRow {
   headword: string;
   pos: string;
   definitions: string;
+  etymology: string | null;
 }
 
 /**
@@ -52,6 +53,7 @@ function wiktionaryPos(camelPos: string): string[] {
 export class SqliteDictionary implements Dictionary {
   private readonly db: DatabaseSync;
   private readonly byWord: StatementSync;
+  private readonly examplesByWord: StatementSync;
 
   constructor(path: string) {
     this.db = new DatabaseSync(path, { readOnly: true });
@@ -62,7 +64,16 @@ export class SqliteDictionary implements Dictionary {
       this.db.close();
       throw new Error(`Dictionary ${path} has schema ${version?.value ?? 'none'}, expected ${SCHEMA_VERSION}`);
     }
-    this.byWord = this.db.prepare('SELECT headword, pos, definitions FROM entries WHERE word = ? ORDER BY id');
+    this.byWord = this.db.prepare(
+      'SELECT headword, pos, definitions, etymology FROM entries WHERE word = ? ORDER BY id',
+    );
+    // Keys arrive as a JSON array, so one statement serves any number of spellings.
+    this.examplesByWord = this.db.prepare(
+      // A sentence with several translations is given once, with its first.
+      `SELECT e.arabic, e.english, min(e.id) AS first FROM examples e
+       WHERE e.id IN (SELECT example_id FROM example_words WHERE word IN (SELECT value FROM json_each(?)))
+       GROUP BY e.arabic ORDER BY length(e.arabic), first LIMIT ?`,
+    );
   }
 
   async lookup(lemma: string, partOfSpeech?: string): Promise<DictionaryEntry | undefined> {
@@ -82,7 +93,16 @@ export class SqliteDictionary implements Dictionary {
       headword: best.headword,
       partOfSpeech: best.pos,
       definitions: JSON.parse(best.definitions) as string[],
+      ...(best.etymology && { etymology: best.etymology }),
     };
+  }
+
+  /** Tatoeba sentences containing any of `words`, shortest first. */
+  async examples(words: string[], limit: number): Promise<ExampleSentence[]> {
+    const keys = [...new Set(words.map(bareKey).filter(Boolean))];
+    if (keys.length === 0 || limit < 1) return [];
+    const rows = this.examplesByWord.all(JSON.stringify(keys), limit) as unknown as ExampleSentence[];
+    return rows.map(({ arabic, english }) => ({ arabic, english }));
   }
 
   close(): void {

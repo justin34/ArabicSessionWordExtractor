@@ -72,3 +72,48 @@ export interface VocabularyEntry {
 }
 
 export type TranscriptListener = (sessionId: number, update: LiveUtterance) => void;
+
+/** One labelled fact in a Detail Module's section, e.g. root ك.ت.ب. */
+export interface DetailFact {
+  label: string;
+  value: string;
+  /** True when the value is Arabic, shown right to left. */
+  arabic?: boolean;
+}
+
+/** One item of a list, e.g. a definition or a Session. */
+export interface DetailItem {
+  text: string;
+  /** Muted text after the item, e.g. how often the word was heard there. */
+  note?: string;
+}
+
+/** An Arabic sentence with its English translation. */
+export interface DetailExample {
+  arabic: string;
+  english: string;
+  /** Where it comes from, e.g. the Session it was heard in. */
+  note?: string;
+}
+
+/** A renderable part of a section. The panel shows each kind its own way. */
+export type DetailBlock =
+  | { kind: 'facts'; facts: DetailFact[] }
+  | { kind: 'list'; items: DetailItem[]; ordered?: boolean }
+  | { kind: 'text'; heading?: string; text: string }
+  | { kind: 'examples'; examples: DetailExample[] };
+
+/** What one Detail Module (ADR 0002) contributes to the word panel. */
+export interface DetailSection {
+  /** Id of the Detail Module that built it. */
+  moduleId: string;
+  title: string;
+  blocks: DetailBlock[];
+}
+
+/** The word panel's content for one Lemma: the enabled modules' sections, in configured order. */
+export interface WordDetails {
+  lemmaId: number;
+  lemma: string;
+  sections: DetailSection[];
+}

@@ -473,6 +473,7 @@ describe('Quick gloss', () => {
       lemma === 'كَتَب' && pos === 'verb'
         ? { lemma, definitions: ['to mark (letters) on a surface, to write, to inscribe'] }
         : undefined,
+    examples: async () => [],
   };
   const providers = (overrides: Partial<Providers> = {}) =>
     fakeProviders({ speechToText: new FakeSpeechToText(once), arabicAnalyzer: analyzer, dictionary, ...overrides });
@@ -491,7 +492,10 @@ describe('Quick gloss', () => {
   });
 
   it('a failed dictionary lookup falls back to the stem gloss', async () => {
-    const broken: Dictionary = { lookup: () => Promise.reject(new Error('dictionary missing')) };
+    const broken: Dictionary = {
+      lookup: () => Promise.reject(new Error('dictionary missing')),
+      examples: async () => [],
+    };
     const sessions = open(providers({ dictionary: broken })).sessions;
 
     const s = await sessions.processRecording(recordedFile([1]));

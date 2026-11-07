@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp, type App } from '../core/app';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
+import { readDetailModuleConfig } from '../core/details/wordDetails';
 import { SqliteDictionary } from '../core/dictionary/sqlite';
 import type { ArabicAnalyzer, Dictionary, SpeechToText, Translator } from '../core/providers';
 import { DeepgramSpeechToText } from '../core/stt/deepgram';
@@ -97,7 +98,18 @@ function dictionaryFromBundle(): Dictionary {
   }
 }
 
-function registerIpc({ sessions, vocabulary }: App): void {
+function requireLemmaId(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new Error('Invalid lemma id');
+  }
+  return value;
+}
+
+function optionalSurface(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length <= 200 ? value : undefined;
+}
+
+function registerIpc({ sessions, vocabulary, words }: App): void {
   // Every window hears every live Session; the renderer picks the one it shows.
   sessions.subscribe((sessionId, update) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -111,6 +123,9 @@ function registerIpc({ sessions, vocabulary }: App): void {
   ipcMain.handle('sessions:stop', (_event, id: unknown) => sessions.stop(requireSessionId(id)));
   ipcMain.handle('sessions:list', () => sessions.list());
   ipcMain.handle('vocabulary:list', () => vocabulary.list());
+  ipcMain.handle('words:details', async (_event, lemmaId: unknown, surface: unknown) =>
+    (await words.details(requireLemmaId(lemmaId), optionalSurface(surface))) ?? null,
+  );
 }
 
 /** Grants getDisplayMedia the primary screen plus Windows loopback (desktop) audio. */
@@ -155,8 +170,11 @@ function loadDevEnvFile(): void {
 
 void app.whenReady().then(() => {
   loadDevEnvFile();
+  const dataDir = app.getPath('userData');
   core = createApp({
-    dataDir: app.getPath('userData'),
+    dataDir,
+    // Until the settings screen (#13), the word panel's modules are set in this file.
+    detailModules: readDetailModuleConfig(join(dataDir, 'detail-modules.json')),
     providers: {
       speechToText: speechToTextFromEnv(process.env),
       translator: translatorFromEnv(process.env),

@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   bareKey,
   DictionaryWriter,
+  exampleWords,
   tatoebaPairs,
   tatoebaSentence,
   wiktionaryRow,
@@ -57,6 +58,16 @@ describe('Extracting Wiktionary entries', () => {
     expect(wiktionaryRow(mixed)?.definitions).toEqual(['writing']);
   });
 
+  it("keeps the entry's etymology when Wiktionary gives one", () => {
+    const entry = {
+      ...wiktextract('كتب', 'verb', 'كَتَبَ', [{ glosses: ['to write'] }]),
+      etymology_text: ' From the root ك ت ب (k-t-b). ',
+    };
+
+    expect(wiktionaryRow(entry)?.etymology).toBe('From the root ك ت ب (k-t-b).');
+    expect(wiktionaryRow({ ...entry, etymology_text: '' })).not.toHaveProperty('etymology');
+  });
+
   it('skips other languages, letters and affixes', () => {
     expect(wiktionaryRow({ ...wiktextract('كتب', 'verb', 'كَتَبَ', [{ glosses: ['x'] }]), lang_code: 'fa' })).toBeNull();
     expect(wiktionaryRow(wiktextract('ب', 'character', 'ب', [{ glosses: ['letter'] }]))).toBeNull();
@@ -85,6 +96,10 @@ describe('Extracting Tatoeba pairs', () => {
     ]);
   });
 
+  it("splits an example into its words' lookup keys", () => {
+    expect(exampleWords('كَتَبَ الطالبُ، الطالبُ؟')).toEqual(['كتب', 'الطالب']);
+  });
+
   it('reads a sentences export line', () => {
     expect(tatoebaSentence('42\tara\tمرحبا\n')).toEqual([42, 'مرحبا']);
     expect(tatoebaSentence('oops')).toBeNull();
@@ -99,7 +114,7 @@ describe('Looking Lemmas up in the built dictionary', () => {
     { word: 'من', headword: 'مَن', partOfSpeech: 'pron', definitions: ['who'] },
     { word: 'من', headword: 'مِن', partOfSpeech: 'prep', definitions: ['from, of'] },
     { word: 'كتب', headword: 'كُتُب', partOfSpeech: 'noun', definitions: ['books'] },
-    { word: 'كتب', headword: 'كَتَبَ', partOfSpeech: 'verb', definitions: ['to write'] },
+    { word: 'كتب', headword: 'كَتَبَ', partOfSpeech: 'verb', definitions: ['to write'], etymology: 'From the root ك ت ب.' },
     { word: 'كتاب', headword: 'كِتَاب', partOfSpeech: 'noun', definitions: ['book'] },
     { word: 'علم', headword: 'عَلَم', partOfSpeech: 'noun', definitions: ['flag'] },
     { word: 'علم', headword: 'عِلْم', partOfSpeech: 'noun', definitions: ['knowledge, science'] },
@@ -107,12 +122,20 @@ describe('Looking Lemmas up in the built dictionary', () => {
     { word: 'اسم', headword: 'اِسْم', partOfSpeech: 'noun', definitions: ['name'] },
   ];
 
+  const examples = [
+    { arabic: 'أنا طالب.', english: 'I am a student.' },
+    { arabic: 'كَتَبَ الطالبُ رسالةً طويلةً جدًّا.', english: 'The student wrote a very long letter.' },
+    { arabic: 'هل كتبتم؟', english: 'Did you write?' },
+    { arabic: 'هل كتبتم؟', english: 'Have you written?' },
+    { arabic: 'المكتبة كبيرة.', english: 'The library is big.' },
+  ];
+
   function build(): SqliteDictionary {
     const path = join(dir, 'dictionary.db');
     const writer = new DictionaryWriter(path);
     rows.forEach((r) => writer.addEntry(r));
-    writer.addExample({ arabic: 'أنا طالب.', english: 'I am a student.' });
-    expect(writer.finish({ source: 'test' })).toEqual({ entries: rows.length, examples: 1 });
+    examples.forEach((e) => writer.addExample(e));
+    expect(writer.finish({ source: 'test' })).toEqual({ entries: rows.length, examples: examples.length });
     dictionary = new SqliteDictionary(path);
     return dictionary;
   }
@@ -161,6 +184,27 @@ describe('Looking Lemmas up in the built dictionary', () => {
     // Two nouns spelled علم, neither with these diacritics: no guess.
     expect(await d.lookup('عُلَم', 'noun')).toBeUndefined();
     expect(await d.lookup('غَيْر', 'noun')).toBeUndefined();
+  });
+
+  it('gives the etymology with the entry', async () => {
+    const d = build();
+
+    expect(await d.lookup('كَتَب', 'verb')).toMatchObject({ etymology: 'From the root ك ت ب.' });
+    expect(await d.lookup('كِتاب', 'noun')).not.toHaveProperty('etymology');
+  });
+
+  it('finds example sentences by whole words, ignoring diacritics and punctuation, shortest first, each once', async () => {
+    const d = build();
+
+    expect(await d.examples(['كتبتم', 'الطَّالِب'], 5)).toEqual([
+      { arabic: 'هل كتبتم؟', english: 'Did you write?' },
+      { arabic: 'كَتَبَ الطالبُ رسالةً طويلةً جدًّا.', english: 'The student wrote a very long letter.' },
+    ]);
+    // كتب is not a whole word of المكتبة.
+    expect(await d.examples(['كَتَبَ'], 5)).toHaveLength(1);
+    expect(await d.examples(['كتبتم', 'الطالب'], 1)).toHaveLength(1);
+    expect(await d.examples(['غير'], 5)).toEqual([]);
+    expect(await d.examples([], 5)).toEqual([]);
   });
 
   it('refuses a database built with another schema', () => {
