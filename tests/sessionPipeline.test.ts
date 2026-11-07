@@ -9,7 +9,7 @@ import {
   FakeSpeechToText,
   FakeTranslator,
 } from '../src/core/fakes';
-import type { Providers, SttEvent, Translator } from '../src/core/providers';
+import type { ArabicAnalyzer, Providers, SttEvent, Translator } from '../src/core/providers';
 import type { LiveUtterance } from '../src/core/types';
 
 const script: SttEvent[] = [
@@ -158,29 +158,34 @@ describe('Word timings', () => {
     },
   ];
   const tokens = [
-    { surface: 'مرحبا', startMs: 0, endMs: 600, gloss: '', lemmaId: null },
-    { surface: 'بكم', startMs: 700, endMs: 1200, gloss: '', lemmaId: null },
+    { surface: 'مرحبا', startMs: 0, endMs: 600, gloss: '' },
+    { surface: 'بكم', startMs: 700, endMs: 1200, gloss: '' },
   ];
+  const withLemmas = tokens.map((t) => ({ ...t, lemmaId: expect.any(Number) }));
+  const withoutLemmas = tokens.map((t) => ({ ...t, lemmaId: null }));
 
-  it('stores each final word as a Token with its timing, kept across a restart', async () => {
+  it('stores each final word as a Token with its timing and Lemma, kept across a restart', async () => {
     const sessions = open(fakeProviders({ speechToText: new FakeSpeechToText(timed) })).sessions;
     const s = await sessions.processRecording(recordedFile([1]));
     app?.close();
 
     expect(open().sessions.transcript(s.id)).toEqual([
-      expect.objectContaining({ text: 'مرحبا بكم', tokens }),
+      expect.objectContaining({ text: 'مرحبا بكم', tokens: withLemmas }),
     ]);
   });
 
-  it('sends the final updates with their timed Tokens, and the interim one without', async () => {
+  it('sends the final update with its timed Tokens at once, and their Lemmas once analyzed', async () => {
     const sessions = open(fakeProviders({ speechToText: new FakeSpeechToText(timed) })).sessions;
     const updates: LiveUtterance[] = [];
     sessions.subscribe((_id, u) => updates.push(u));
 
     await sessions.processRecording(recordedFile([1]));
 
-    // The final Utterance, then the same again with its translation.
-    expect(updates.map((u) => u.tokens)).toEqual([[], tokens, tokens]);
+    // Interim, then final, then the same again as its translation and analysis fill in.
+    expect(updates).toHaveLength(4);
+    expect(updates[0].tokens).toEqual([]);
+    expect(updates[1].tokens).toEqual(withoutLemmas);
+    expect(updates.at(-1)).toMatchObject({ translation: 'Welcome', tokens: withLemmas });
   });
 });
 
@@ -296,6 +301,154 @@ describe('Sentence translation', () => {
   });
 });
 
+describe('Vocabulary', () => {
+  /** A final Utterance whose words are timed one after another. */
+  function final(text: string, startMs: number): SttEvent {
+    const words = text.split(' ').map((w, i) => ({
+      text: w,
+      startMs: startMs + i * 500,
+      endMs: startMs + i * 500 + 400,
+    }));
+    return { type: 'final', text, startMs, endMs: words.at(-1)!.endMs, words };
+  }
+  const lemmas = {
+    كتب: 'كَتَب',
+    كتبوا: 'كَتَب',
+    الطالب: 'طالِب',
+    الطلاب: 'طالِب',
+    الدرس: 'دَرْس',
+  };
+  const classOne = [
+    { type: 'interim', text: 'كتب', startMs: 0, endMs: 300 } as SttEvent,
+    final('كتب الطالب الدرس.', 0),
+    final('الطلاب كتبوا', 2000),
+  ];
+  const classTwo = [final('كتب الطالب', 0)];
+
+  const providersFor = (script: SttEvent[], analyzer: ArabicAnalyzer = new FakeArabicAnalyzer(lemmas)) =>
+    fakeProviders({ speechToText: new FakeSpeechToText(script), arabicAnalyzer: analyzer });
+
+  it('appends each new Lemma heard, with its surface forms, count and Utterances', async () => {
+    const core = open(providersFor(classOne));
+    const before = new Date().toISOString();
+
+    const s = await core.sessions.processRecording(recordedFile([1]));
+
+    const [first, second] = core.sessions.transcript(s.id).map((u) => u.id);
+    const entries = core.vocabulary.list();
+    expect(entries.map((e) => [e.lemma, e.surfaceForms, e.count, e.heardIn])).toEqual(
+      expect.arrayContaining([
+        [
+          'كَتَب',
+          ['كتب', 'كتبوا'],
+          2,
+          [
+            { sessionId: s.id, utteranceId: first },
+            { sessionId: s.id, utteranceId: second },
+          ],
+        ],
+        [
+          'طالِب',
+          ['الطالب', 'الطلاب'],
+          2,
+          [
+            { sessionId: s.id, utteranceId: first },
+            { sessionId: s.id, utteranceId: second },
+          ],
+        ],
+        ['دَرْس', ['الدرس'], 1, [{ sessionId: s.id, utteranceId: first }]],
+      ]),
+    );
+    expect(entries).toHaveLength(3);
+    for (const e of entries) expect(e.firstHeardAt >= before).toBe(true);
+  });
+
+  it('links every Token to its Lemma in the Vocabulary', async () => {
+    const core = open(providersFor(classOne));
+
+    const s = await core.sessions.processRecording(recordedFile([1]));
+
+    const idOf = new Map(core.vocabulary.list().map((e) => [e.lemma, e.lemmaId]));
+    expect(
+      core.sessions.transcript(s.id).map((u) => u.tokens.map((t) => [t.surface, t.lemmaId])),
+    ).toEqual([
+      [
+        ['كتب', idOf.get('كَتَب')],
+        ['الطالب', idOf.get('طالِب')],
+        ['الدرس.', idOf.get('دَرْس')],
+      ],
+      [
+        ['الطلاب', idOf.get('طالِب')],
+        ['كتبوا', idOf.get('كَتَب')],
+      ],
+    ]);
+  });
+
+  it('counts a Lemma heard again in a later Session, keeping when it was first heard', async () => {
+    const one = await open(providersFor(classOne)).sessions.processRecording(recordedFile([1]));
+    const firstHeard = app!.vocabulary.list().find((e) => e.lemma === 'كَتَب')!.firstHeardAt;
+    app?.close();
+
+    const core = open(providersFor(classTwo));
+    const two = await core.sessions.processRecording(recordedFile([2]));
+
+    const katab = core.vocabulary.list().find((e) => e.lemma === 'كَتَب')!;
+    expect(katab).toMatchObject({ count: 3, surfaceForms: ['كتب', 'كتبوا'], firstHeardAt: firstHeard });
+    expect(new Set(katab.heardIn.map((h) => h.sessionId))).toEqual(new Set([one.id, two.id]));
+    expect(core.vocabulary.list()).toHaveLength(3);
+  });
+
+  it('a failed analysis leaves the Utterance stored and out of the Vocabulary, and recording carries on', async () => {
+    let calls = 0;
+    const fake = new FakeArabicAnalyzer(lemmas);
+    const failingOnce: ArabicAnalyzer = {
+      analyze: (sentence: string) =>
+        calls++ === 0 ? Promise.reject(new Error('helper stopped')) : fake.analyze(sentence),
+    };
+    const core = open(providersFor(classOne, failingOnce));
+
+    const s = await core.sessions.processRecording(recordedFile([1]));
+
+    expect(s.status).toBe('completed');
+    const transcript = core.sessions.transcript(s.id);
+    expect(transcript.map((u) => u.text)).toEqual(['كتب الطالب الدرس.', 'الطلاب كتبوا']);
+    expect(transcript[0].tokens.map((t) => t.lemmaId)).toEqual([null, null, null]);
+    expect(core.vocabulary.list().map((e) => [e.lemma, e.count])).toEqual(
+      expect.arrayContaining([
+        ['كَتَب', 1],
+        ['طالِب', 1],
+      ]),
+    );
+    expect(core.vocabulary.list()).toHaveLength(2);
+  });
+
+  it('waits for the last analysis before the Session completes', async () => {
+    let release!: () => void;
+    const fake = new FakeArabicAnalyzer(lemmas);
+    const slow: ArabicAnalyzer = {
+      analyze: (sentence: string) =>
+        new Promise<void>((resolve) => (release = resolve)).then(() => fake.analyze(sentence)),
+    };
+    const core = open(providersFor(classTwo, slow));
+    const s = core.sessions.start();
+    let stopped = false;
+    const stopping = core.sessions.stop(s.id).then(() => (stopped = true));
+    await vi.waitFor(() => expect(release).toBeDefined());
+    expect(stopped).toBe(false);
+
+    release();
+    await stopping;
+
+    expect(core.vocabulary.list().map((e) => e.lemma)).toEqual(
+      expect.arrayContaining(['كَتَب', 'طالِب']),
+    );
+  });
+
+  it('is empty before anything is heard', () => {
+    expect(open().vocabulary.list()).toEqual([]);
+  });
+});
+
 describe('Session list', () => {
   it('lists newest Session first and survives an app restart', async () => {
     const first = open().sessions;
@@ -339,6 +492,10 @@ describe('Provider interfaces', () => {
     expect(await p.arabicAnalyzer.analyze('كتب الولد')).toEqual([
       { surface: 'كتب', lemma: 'كتب' },
       { surface: 'الولد', lemma: 'الولد' },
+    ]);
+    expect(await new FakeArabicAnalyzer({ كتبوا: 'كَتَب' }).analyze('كتبوا الدرس.')).toEqual([
+      { surface: 'كتبوا', lemma: 'كَتَب' },
+      { surface: 'الدرس', lemma: 'الدرس' },
     ]);
     expect(await p.dictionary.lookup('كتب')).toEqual({ lemma: 'كتب', definitions: ['to write'] });
     expect(await p.dictionary.lookup('missing')).toBeUndefined();

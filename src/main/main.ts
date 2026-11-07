@@ -73,7 +73,7 @@ function arabicAnalyzerFromBundle(): ArabicAnalyzer {
   return analyzer;
 }
 
-function registerIpc(sessions: App['sessions']): void {
+function registerIpc({ sessions, vocabulary }: App): void {
   // Every window hears every live Session; the renderer picks the one it shows.
   sessions.subscribe((sessionId, update) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -86,6 +86,7 @@ function registerIpc(sessions: App['sessions']): void {
   );
   ipcMain.handle('sessions:stop', (_event, id: unknown) => sessions.stop(requireSessionId(id)));
   ipcMain.handle('sessions:list', () => sessions.list());
+  ipcMain.handle('vocabulary:list', () => vocabulary.list());
 }
 
 /** Grants getDisplayMedia the primary screen plus Windows loopback (desktop) audio. */
@@ -140,7 +141,7 @@ void app.whenReady().then(() => {
       dictionary: new FakeDictionary(),
     },
   });
-  registerIpc(core.sessions);
+  registerIpc(core);
   allowDesktopAudioCapture();
   createWindow();
 });

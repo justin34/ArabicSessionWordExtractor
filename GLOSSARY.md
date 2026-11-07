@@ -28,6 +28,7 @@ A desktop app that listens to spoken Arabic (class, videos), shows a live visual
 | Language | Arabic → English only, hardcoded. **MSA (Fusha) only** |
 | Vocabulary unit | Lemma; surface forms tracked |
 | Translation | Word-level gloss and sentence-level, both |
+| Vocabulary (#7) | Each final Utterance is analyzed alongside its translation, never holding up the next one; a failed analysis leaves that Utterance's words out of the Vocabulary. A Lemma is identified by the analyzer's diacritized dictionary form (`lex`), one row per spelling. Every analyzed word with a letter is an occurrence: the count is occurrences across all Sessions, first heard is the wall-clock time its Utterance went final, and each new surface form (punctuation stripped) is added to the Lemma. Analyzed words are matched to the timed Tokens by their letters, so each Token links to its Lemma. The Vocabulary screen searches the Lemma, surface forms, root and English stem gloss, ignoring diacritics, hamza on alef, ى/ي, ة/ه and case |
 | Study guides | Word Cards and Session Guides; **read-only** (no SRS/quizzing in v1) |
 | Word data | Dictionary / open data (modular per source), not LLM-generated |
 | Storage | Local only: SQLite plus audio files on disk. No accounts |

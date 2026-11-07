@@ -1,6 +1,6 @@
-import type { LiveUtterance, Session } from '../core/types';
+import type { LiveUtterance, Session, VocabularyEntry } from '../core/types';
 
-export type { LiveUtterance };
+export type { LiveUtterance, VocabularyEntry };
 
 export type Unsubscribe = () => void;
 
@@ -13,6 +13,8 @@ export interface Bridge {
   appendDesktopAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
   stopSession(sessionId: number): Promise<Session>;
   listSessions(): Promise<Session[]>;
+  /** The whole Vocabulary, most recently first heard first. */
+  listVocabulary(): Promise<VocabularyEntry[]>;
   /** Live transcript for a real Session. Nothing is connected to it yet. */
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void): Unsubscribe;
 }

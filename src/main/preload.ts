@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('sessions:appendDesktopAudio', sessionId, chunk),
   stopSession: (sessionId: number) => ipcRenderer.invoke('sessions:stop', sessionId),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
+  listVocabulary: () => ipcRenderer.invoke('vocabulary:list'),
   /** Live Transcript updates for every recording Session; returns an unsubscribe. */
   onTranscriptUpdate: (listener: TranscriptListener) => {
     const handler = (_event: IpcRendererEvent, ...[id, update]: Parameters<TranscriptListener>) =>
