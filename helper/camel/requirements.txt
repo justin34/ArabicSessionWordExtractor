@@ -1,0 +1,18 @@
+# Runtime deps for CAMeL morphology + MLE disambiguation, without torch/transformers (spike #2).
+# camel-tools itself is installed separately with --no-deps by scripts/build-camel-helper.mjs.
+# Pinned: rerun `npm run build:helper -- --clean` (which runs the spike's smoke.py) after any change.
+cachetools==8.0.0
+certifi==2026.10.23
+charset_normalizer==3.5.2
+colorama==0.4.6
+docopt==0.6.2
+editdistance==0.8.1
+emoji==2.16.0
+idna==3.20
+muddler==0.1.3
+pyrsistent==0.20.0
+regex==2026.11.7
+requests==2.34.2
+six==1.17.0
+tqdm==4.70.1
+urllib3==2.8.0

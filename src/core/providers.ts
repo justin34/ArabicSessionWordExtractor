@@ -30,14 +30,31 @@ export interface Translator {
   translate(arabic: string): Promise<string>;
 }
 
-/** One analysis per Token of a final sentence. */
+/** A prefix or suffix attached to a word, e.g. وَ "and" or هُم "their". */
+export interface Clitic {
+  /** Diacritized form, e.g. 'بِ'. */
+  form: string;
+  /** The analyzer's feature value, e.g. 'bi_prep' or '3mp_poss'. */
+  feature: string;
+}
+
+/** One analysis per Token of a final sentence: the reading chosen for that word. */
 export interface TokenAnalysis {
+  /** The word as written in the sentence. */
   surface: string;
+  /** Dictionary form (the Lemma), diacritized. */
   lemma: string;
+  /** The surface form with the chosen reading's diacritics. */
+  diacritized?: string;
+  /** Root radicals separated by dots, e.g. 'ك.ت.ب'. */
   root?: string;
+  pattern?: string;
   partOfSpeech?: string;
+  /** Phonetic transcription of the diacritized form. */
   pronunciation?: string;
   stemGloss?: string;
+  prefixes?: Clitic[];
+  suffixes?: Clitic[];
 }
 
 /** Arabic analysis: a whole final sentence in, one analysis per Token out. */
