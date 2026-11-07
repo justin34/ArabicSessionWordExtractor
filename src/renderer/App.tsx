@@ -119,7 +119,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
       audio.begin((chunk) => {
         rec.writes = rec.writes.then(async () => {
           try {
-            await bridge.appendAudio(created.id, chunk);
+            await bridge.appendDesktopAudio(created.id, chunk);
           } catch (err) {
             rec.writeError = err as Error;
           }

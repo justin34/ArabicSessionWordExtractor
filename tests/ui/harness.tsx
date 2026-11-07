@@ -45,7 +45,7 @@ export class FakeBridge implements Bridge {
     this.calls.push(`start:${s.id}`);
     return s;
   }
-  async appendAudio(sessionId: number, chunk: Uint8Array) {
+  async appendDesktopAudio(sessionId: number, chunk: Uint8Array) {
     if (this.appendError) throw this.appendError;
     this.chunks.push({ sessionId, chunk });
   }

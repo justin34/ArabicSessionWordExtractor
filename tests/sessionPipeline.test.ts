@@ -1,105 +1,192 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp, type App } from '../src/core/app';
 import {
-  FakeSpeechToText,
-  FakeTranslator,
   FakeArabicAnalyzer,
   FakeDictionary,
+  FakeSpeechToText,
+  FakeTranslator,
 } from '../src/core/fakes';
+import type { Providers, SttEvent } from '../src/core/providers';
+
+const script: SttEvent[] = [
+  { type: 'interim', text: 'مر', startMs: 0, endMs: 300 },
+  { type: 'final', text: 'مرحبا بكم', startMs: 0, endMs: 1200 },
+  { type: 'interim', text: 'كيف', startMs: 1300, endMs: 1600 },
+  { type: 'final', text: 'كيف حالكم', startMs: 1300, endMs: 2400 },
+];
+
+function fakeProviders(overrides: Partial<Providers> = {}): Providers {
+  return {
+    speechToText: new FakeSpeechToText(script),
+    translator: new FakeTranslator({ 'مرحبا بكم': 'Welcome', 'كيف حالكم': 'How are you all' }),
+    arabicAnalyzer: new FakeArabicAnalyzer(),
+    dictionary: new FakeDictionary({}),
+    ...overrides,
+  };
+}
 
 let dir: string;
-let app: App;
+let app: App | undefined;
+
+function open(providers = fakeProviders()): App {
+  app = createApp({ dataDir: dir, providers });
+  return app;
+}
+
+function recordedFile(bytes: number[]): string {
+  const path = join(dir, 'class.webm');
+  writeFileSync(path, Buffer.from(bytes));
+  return path;
+}
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'ill-'));
-  app = createApp({
-    dataDir: dir,
-    providers: {
-      speechToText: new FakeSpeechToText([
-        { type: 'interim', text: 'مر', startMs: 0, endMs: 300 },
-        { type: 'final', text: 'مرحبا بكم', startMs: 0, endMs: 1200 },
-        { type: 'final', text: 'كيف حالكم', startMs: 1300, endMs: 2400 },
-      ]),
-      translator: new FakeTranslator({ 'مرحبا بكم': 'Welcome', 'كيف حالكم': 'How are you all' }),
-      arabicAnalyzer: new FakeArabicAnalyzer(),
-      dictionary: new FakeDictionary(),
-    },
-  });
 });
 
 afterEach(() => {
-  app.close();
+  app?.close();
+  app = undefined;
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('Session pipeline', () => {
-  it('turns a recorded audio file into a stored Session with a translated Transcript', async () => {
-    const audio = join(dir, 'class.webm');
-    writeFileSync(audio, Buffer.from([1, 2, 3, 4, 5]));
+describe('Session pipeline fed a recorded audio file', () => {
+  it('stores a completed Session whose Desktop Track is the recorded audio', async () => {
+    const sessions = open().sessions;
 
-    const sessionId = await app.sessions.processRecording(audio);
+    const session = await sessions.processRecording(recordedFile([1, 2, 3, 4, 5]));
 
-    const sessions = app.sessions.list();
-    expect(sessions).toHaveLength(1);
-    expect(sessions[0].id).toBe(sessionId);
-    expect(sessions[0].status).toBe('completed');
-    expect(existsSync(sessions[0].desktopTrackPath)).toBe(true);
-    expect([...readFileSync(sessions[0].desktopTrackPath)]).toEqual([1, 2, 3, 4, 5]);
-
-    const transcript = app.sessions.getTranscript(sessionId);
-    expect(transcript.map((u) => u.text)).toEqual(['مرحبا بكم', 'كيف حالكم']);
-    expect(transcript.map((u) => u.translation)).toEqual(['Welcome', 'How are you all']);
-    expect(transcript[1].startMs).toBe(1300);
+    expect(session.status).toBe('completed');
+    expect(session.endedAt).not.toBeNull();
+    expect([...readFileSync(session.desktopTrackPath)]).toEqual([1, 2, 3, 4, 5]);
+    expect(sessions.list()).toEqual([session]);
   });
 
-  it('does not store interim results as Utterances', async () => {
-    const audio = join(dir, 'a.webm');
-    writeFileSync(audio, Buffer.from([9]));
-    const id = await app.sessions.processRecording(audio);
-    expect(app.sessions.getTranscript(id)).toHaveLength(2);
+  it('stores a Transcript of the final Utterances, translated, in order, with timings', async () => {
+    const sessions = open().sessions;
+
+    const session = await sessions.processRecording(recordedFile([1, 2, 3]));
+
+    expect(sessions.transcript(session.id)).toEqual([
+      expect.objectContaining({ text: 'مرحبا بكم', translation: 'Welcome', startMs: 0, endMs: 1200 }),
+      expect.objectContaining({
+        text: 'كيف حالكم',
+        translation: 'How are you all',
+        startMs: 1300,
+        endMs: 2400,
+      }),
+    ]);
+  });
+
+  it('keeps the recorded file type for the Desktop Track', async () => {
+    const path = join(dir, 'clip.wav');
+    writeFileSync(path, Buffer.from([1]));
+
+    const session = await open().sessions.processRecording(path);
+
+    expect(session.desktopTrackPath).toMatch(/\.wav$/);
+  });
+
+  it('gives the speech-to-text provider exactly the audio that was recorded', async () => {
+    const stt = new FakeSpeechToText(script);
+    const sessions = open(fakeProviders({ speechToText: stt })).sessions;
+
+    await sessions.processRecording(recordedFile([7, 8, 9]));
+
+    expect([...stt.received]).toEqual([7, 8, 9]);
   });
 });
 
-describe('Live recording lifecycle', () => {
-  it('start, append desktop audio chunks, stop: saves the Desktop Track and completes the Session', () => {
-    const session = app.sessions.start();
-    expect(session.status).toBe('recording');
+describe('Live Session', () => {
+  it('start, stream desktop audio, stop: saves the Desktop Track and the Transcript', async () => {
+    const sessions = open().sessions;
 
-    app.sessions.appendDesktopAudio(session.id, new Uint8Array([1, 2]));
-    app.sessions.appendDesktopAudio(session.id, new Uint8Array([3]));
-    const done = app.sessions.stop(session.id);
+    const started = sessions.start();
+    expect(started.status).toBe('recording');
+    expect(sessions.list()).toEqual([started]);
+
+    sessions.appendDesktopAudio(started.id, new Uint8Array([1, 2]));
+    sessions.appendDesktopAudio(started.id, new Uint8Array([3]));
+    const done = await sessions.stop(started.id);
 
     expect(done.status).toBe('completed');
-    expect(done.endedAt).not.toBeNull();
     expect([...readFileSync(done.desktopTrackPath)]).toEqual([1, 2, 3]);
-    expect(app.sessions.list().map((s) => s.id)).toEqual([session.id]);
+    expect(sessions.transcript(done.id).map((u) => u.text)).toEqual(['مرحبا بكم', 'كيف حالكم']);
   });
 
-  it('lists newest Session first', () => {
-    const a = app.sessions.start();
-    app.sessions.stop(a.id);
-    const b = app.sessions.start();
-    app.sessions.stop(b.id);
-    expect(app.sessions.list().map((s) => s.id)).toEqual([b.id, a.id]);
+  it('rejects desktop audio for a Session that is not recording', async () => {
+    const sessions = open().sessions;
+    const s = sessions.start();
+    await sessions.stop(s.id);
+
+    expect(() => sessions.appendDesktopAudio(s.id, new Uint8Array([1]))).toThrow(/not recording/);
   });
 
-  it('rejects audio for a Session that is not recording', () => {
-    const s = app.sessions.start();
-    app.sessions.stop(s.id);
-    expect(() => app.sessions.appendDesktopAudio(s.id, new Uint8Array([1]))).toThrow();
+  it('keeps the recording when speech-to-text fails', async () => {
+    const failing = {
+      async *transcribe(audio: AsyncIterable<Uint8Array>): AsyncIterable<SttEvent> {
+        for await (const _ of audio) throw new Error('network down');
+      },
+    };
+    const sessions = open(fakeProviders({ speechToText: failing })).sessions;
+
+    const s = sessions.start();
+    sessions.appendDesktopAudio(s.id, new Uint8Array([4]));
+    sessions.appendDesktopAudio(s.id, new Uint8Array([5]));
+    const done = await sessions.stop(s.id);
+
+    expect(done.status).toBe('completed');
+    expect([...readFileSync(done.desktopTrackPath)]).toEqual([4, 5]);
+  });
+});
+
+describe('Session list', () => {
+  it('lists newest Session first and survives an app restart', async () => {
+    const first = open().sessions;
+    const a = await first.stop(first.start().id);
+    const b = await first.stop(first.start().id);
+    app?.close();
+
+    const reopened = open().sessions;
+    expect(reopened.list().map((s) => s.id)).toEqual([b.id, a.id]);
+  });
+
+  it('stopAll completes every live Session, keeping their Desktop Tracks', async () => {
+    const sessions = open().sessions;
+    const s = sessions.start();
+    sessions.appendDesktopAudio(s.id, new Uint8Array([6]));
+
+    await sessions.stopAll();
+
+    expect(sessions.list().map((x) => x.status)).toEqual(['completed']);
+    expect([...readFileSync(s.desktopTrackPath)]).toEqual([6]);
+  });
+
+  it('completes a Session left recording by a crash when the app reopens', () => {
+    const crashed = open().sessions.start();
+    app?.close(); // no stop: simulates the app dying mid-recording
+
+    const reopened = open().sessions;
+    const recovered = reopened.list().find((s) => s.id === crashed.id);
+    expect(recovered?.status).toBe('completed');
+    expect(recovered?.endedAt).not.toBeNull();
   });
 });
 
 describe('Provider interfaces', () => {
-  it('exposes the four providers the pipeline is built on', () => {
-    expect(Object.keys(app.providers).sort()).toEqual([
-      'arabicAnalyzer',
-      'dictionary',
-      'speechToText',
-      'translator',
+  it('fake translator, analyzer and dictionary answer from their fixtures', async () => {
+    const p = fakeProviders({
+      dictionary: new FakeDictionary({ كتب: ['to write'] }),
+    });
+
+    expect(await p.translator.translate('مرحبا بكم')).toBe('Welcome');
+    expect(await p.arabicAnalyzer.analyze('كتب الولد')).toEqual([
+      { surface: 'كتب', lemma: 'كتب' },
+      { surface: 'الولد', lemma: 'الولد' },
     ]);
+    expect(await p.dictionary.lookup('كتب')).toEqual({ lemma: 'كتب', definitions: ['to write'] });
+    expect(await p.dictionary.lookup('missing')).toBeUndefined();
   });
 });

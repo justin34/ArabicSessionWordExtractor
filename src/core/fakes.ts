@@ -8,18 +8,25 @@ import type {
   Translator,
 } from './providers';
 
-/** Replays a scripted list of events once the audio stream has been fully consumed. */
+/** Consumes the whole audio stream, then replays a scripted list of events. */
 export class FakeSpeechToText implements SpeechToText {
+  /** Every audio byte this provider was given, in order. */
+  received = new Uint8Array();
+
   constructor(private readonly script: SttEvent[]) {}
 
   async *transcribe(audio: AsyncIterable<Uint8Array>): AsyncIterable<SttEvent> {
-    for await (const _chunk of audio) {
-      // consume the stream like a real provider would
+    for await (const chunk of audio) {
+      const joined = new Uint8Array(this.received.length + chunk.length);
+      joined.set(this.received);
+      joined.set(chunk, this.received.length);
+      this.received = joined;
     }
-    for (const event of this.script) yield event;
+    yield* this.script;
   }
 }
 
+/** Translates from a fixed table; unknown sentences translate to ''. */
 export class FakeTranslator implements Translator {
   constructor(private readonly table: Record<string, string> = {}) {}
 
@@ -28,6 +35,7 @@ export class FakeTranslator implements Translator {
   }
 }
 
+/** Splits on whitespace and uses each surface form as its own Lemma. */
 export class FakeArabicAnalyzer implements ArabicAnalyzer {
   async analyze(sentence: string): Promise<TokenAnalysis[]> {
     return sentence
@@ -37,8 +45,12 @@ export class FakeArabicAnalyzer implements ArabicAnalyzer {
   }
 }
 
+/** Looks Lemmas up in a small fixed table. */
 export class FakeDictionary implements Dictionary {
-  async lookup(_lemma: string): Promise<DictionaryEntry | undefined> {
-    return undefined;
+  constructor(private readonly entries: Record<string, string[]> = {}) {}
+
+  async lookup(lemma: string): Promise<DictionaryEntry | undefined> {
+    const definitions = this.entries[lemma];
+    return definitions ? { lemma, definitions } : undefined;
   }
 }

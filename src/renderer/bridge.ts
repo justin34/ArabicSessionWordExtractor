@@ -20,7 +20,7 @@ export type Unsubscribe = () => void;
  */
 export interface Bridge {
   startSession(): Promise<Session>;
-  appendAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
+  appendDesktopAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
   stopSession(sessionId: number): Promise<Session>;
   listSessions(): Promise<Session[]>;
   /** Live transcript for a real Session. Nothing is connected to it yet. */
