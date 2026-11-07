@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import type { TranscriptListener } from '../core/types';
 import type { Bridge, Unsubscribe } from './bridge';
-import { browserDesktopAudio, browserMicAudio } from './browserCapture';
+import { browserAudioInputs, browserDesktopAudio, browserMicAudio } from './browserCapture';
 import { demoFeedForBuild } from './demoFeed';
 import './tokens.css';
 
@@ -30,6 +30,7 @@ createRoot(document.getElementById('root')!).render(
       bridge={bridge}
       capture={browserDesktopAudio}
       micCapture={browserMicAudio}
+      audioInputs={browserAudioInputs}
       demoFeed={demoFeedForBuild(import.meta.env.DEV)}
     />
   </StrictMode>,

@@ -5,6 +5,7 @@ import { createApp, type App } from '../core/app';
 import { audioFileResponse } from '../core/audioFile';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
 import { readDetailModuleConfig } from '../core/details/wordDetails';
+import { parseAudioSettings } from '../core/settings';
 import { SqliteDictionary } from '../core/dictionary/sqlite';
 import type { ArabicAnalyzer, Dictionary, SpeechToText, Translator } from '../core/providers';
 import { DeepgramSpeechToText } from '../core/stt/deepgram';
@@ -110,7 +111,7 @@ function optionalSurface(value: unknown): string | undefined {
   return typeof value === 'string' && value.length <= 200 ? value : undefined;
 }
 
-function registerIpc({ sessions, vocabulary, words, guides }: App): void {
+function registerIpc({ sessions, vocabulary, words, guides, settings }: App): void {
   // Every window hears every live Session; the renderer picks the one it shows.
   sessions.subscribe((sessionId, update) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -134,6 +135,12 @@ function registerIpc({ sessions, vocabulary, words, guides }: App): void {
     (await words.details(requireLemmaId(lemmaId), optionalSurface(surface))) ?? null,
   );
   ipcMain.handle('guides:wordCard', (_event, lemmaId: unknown) => guides.wordCard(requireLemmaId(lemmaId)) ?? null);
+  ipcMain.handle('settings:audio', () => settings.audio());
+  ipcMain.handle('settings:setAudio', (_event, value: unknown) => {
+    const audio = parseAudioSettings(value);
+    if (!audio) throw new Error('Invalid audio settings');
+    return settings.setAudio(audio);
+  });
   ipcMain.handle(
     'guides:sessionGuide',
     (_event, id: unknown) => guides.sessionGuide(requireSessionId(id)) ?? null,

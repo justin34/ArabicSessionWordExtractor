@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   AudioCapture,
+  AudioInputs,
+  AudioSettings,
   Bridge,
   DemoFeed,
   DesktopAudioCapture,
@@ -10,13 +12,12 @@ import type {
   Unsubscribe,
   VocabularyEntry,
 } from './bridge';
-import { NoDesktopAudioError } from './bridge';
-import { EmptyState } from './components/EmptyState';
+import { DeviceUnavailableError, NoDesktopAudioError } from './bridge';
 import { LiveView } from './components/LiveView';
 import { ReplayPlaceholder } from './components/ReplayPlaceholder';
 import { SessionList } from './components/SessionList';
-import { ScreenHeader } from './components/ScreenHeader';
 import { SessionView, type SessionTab } from './components/SessionView';
+import { SettingsView } from './components/SettingsView';
 import { Sidebar, type Destination } from './components/Sidebar';
 import { StartPanel } from './components/StartPanel';
 import { VocabularyList } from './components/VocabularyList';
@@ -31,6 +32,8 @@ export interface AppProps {
   capture: DesktopAudioCapture;
   /** Opens the microphone when the learner chooses a Mic Track. */
   micCapture: MicAudioCapture;
+  /** Lists the audio inputs the Settings screen offers. */
+  audioInputs: AudioInputs;
   /** Present only in dev builds; enables the Demo Session. */
   demoFeed?: DemoFeed;
 }
@@ -58,18 +61,23 @@ interface ActiveRecording {
   writeError: Error | null;
 }
 
+/** The system's own devices: all system audio transcribed, the default microphone. */
+const SYSTEM_AUDIO: AudioSettings = { desktopSource: null, microphone: null };
+
 function sortNewestFirst(list: ListedSession[]): ListedSession[] {
   return [...list].sort(
     (a, b) => b.startedAt.localeCompare(a.startedAt) || b.id - a.id,
   );
 }
 
-export function App({ bridge, capture, micCapture, demoFeed }: AppProps) {
+export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppProps) {
   const [route, setRoute] = useState<Route>({ name: 'sessions' });
   const [realSessions, setRealSessions] = useState<ListedSession[]>([]);
   const [demoSessions, setDemoSessions] = useState<ListedSession[]>([]);
   const [transcripts, setTranscripts] = useState<Record<string, LiveUtterance[]>>({});
   const [startPanelOpen, setStartPanelOpen] = useState(false);
+  /** The devices the next Session records from, loaded when the Start panel opens. */
+  const [startDevices, setStartDevices] = useState<AudioSettings | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [vocabulary, setVocabulary] = useState<VocabularyEntry[] | null>(null);
@@ -135,13 +143,15 @@ export function App({ bridge, capture, micCapture, demoFeed }: AppProps) {
     starting.current = true;
     setStartPanelOpen(false);
     setNotice(null);
+    // The devices chosen in Settings; the system's own when they cannot be read.
+    const devices = startDevices ?? (await bridge.audioSettings().catch(() => SYSTEM_AUDIO));
     let audio: AudioCapture;
     try {
-      audio = await capture.open();
+      audio = await capture.open(devices.desktopSource);
     } catch (err) {
       starting.current = false;
       setNotice(
-        err instanceof NoDesktopAudioError
+        err instanceof NoDesktopAudioError || err instanceof DeviceUnavailableError
           ? err.message
           : `Could not start: ${(err as Error).message}`,
       );
@@ -150,7 +160,7 @@ export function App({ bridge, capture, micCapture, demoFeed }: AppProps) {
     let mic: AudioCapture | null = null;
     if (withMic) {
       try {
-        mic = await micCapture.open();
+        mic = await micCapture.open(devices.microphone);
       } catch (err) {
         starting.current = false;
         await audio.stop().catch(() => undefined);
@@ -267,6 +277,15 @@ export function App({ bridge, capture, micCapture, demoFeed }: AppProps) {
     );
   }
 
+  function openStartPanel(): void {
+    setStartDevices(null);
+    setStartPanelOpen(true);
+    bridge
+      .audioSettings()
+      .then(setStartDevices)
+      .catch(() => setStartDevices(SYSTEM_AUDIO));
+  }
+
   const goSessions = () => setRoute({ name: 'sessions' });
   const sidebarActive = destinationOf(route);
   const liveSession =
@@ -283,6 +302,9 @@ export function App({ bridge, capture, micCapture, demoFeed }: AppProps) {
   const loadSessionGuide = useCallback((sessionId: number) => bridge.sessionGuide(sessionId), [bridge]);
   const loadTranscript = useCallback((sessionId: number) => bridge.transcript(sessionId), [bridge]);
   const loadWordCard = useCallback((lemmaId: number) => bridge.wordCard(lemmaId), [bridge]);
+  const loadAudioSettings = useCallback(() => bridge.audioSettings(), [bridge]);
+  const saveAudioSettings = useCallback((s: AudioSettings) => bridge.saveAudioSettings(s), [bridge]);
+  const listAudioInputs = useCallback(() => audioInputs.list(), [audioInputs]);
   const openWordCard = (lemmaId: number) => setRoute({ name: 'word-card', lemmaId, back: route });
 
   return (
@@ -302,7 +324,7 @@ export function App({ bridge, capture, micCapture, demoFeed }: AppProps) {
             sessions={sessions}
             now={now}
             onOpen={openSession}
-            onStart={() => setStartPanelOpen(true)}
+            onStart={openStartPanel}
             startDisabled={activeId !== null}
             onStartDemo={demoFeed ? startDemo : undefined}
           />
@@ -352,16 +374,17 @@ export function App({ bridge, capture, micCapture, demoFeed }: AppProps) {
           />
         )}
         {route.name === 'settings' && (
-          <>
-            <ScreenHeader title="Settings" />
-            <EmptyState title="Settings are coming soon">
-              API keys and preferences will live here.
-            </EmptyState>
-          </>
+          <SettingsView
+            loadSettings={loadAudioSettings}
+            saveSettings={saveAudioSettings}
+            listDevices={listAudioInputs}
+          />
         )}
       </main>
       {startPanelOpen && (
-        <StartPanel onStart={(options) => void startRecording(options)} onCancel={() => setStartPanelOpen(false)} />
+        <StartPanel
+          devices={startDevices}
+          onStart={(options) => void startRecording(options)} onCancel={() => setStartPanelOpen(false)} />
       )}
     </div>
   );

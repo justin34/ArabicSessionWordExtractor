@@ -16,6 +16,9 @@
 .modal__hint {
   color: var(--color-text-muted);
 }
+.modal__devices {
+  font-size: var(--text-sm);
+}
 .modal__option {
   display: grid;
   grid-template-columns: auto 1fr;

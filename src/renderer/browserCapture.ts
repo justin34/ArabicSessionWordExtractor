@@ -1,9 +1,28 @@
 import {
+  DeviceUnavailableError,
   NoDesktopAudioError,
   type AudioCapture,
+  type AudioDevice,
+  type AudioInputs,
   type DesktopAudioCapture,
   type MicAudioCapture,
 } from './bridge';
+
+/** Opens one input device, or the default one. Throws DeviceUnavailableError when it is gone. */
+async function openInput(device: AudioDevice | null, constraints: MediaTrackConstraints = {}): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: device ? { ...constraints, deviceId: { exact: device.deviceId } } : { ...constraints },
+      video: false,
+    });
+  } catch (err) {
+    const name = (err as DOMException).name;
+    if (device && (name === 'OverconstrainedError' || name === 'NotFoundError')) {
+      throw new DeviceUnavailableError(device);
+    }
+    throw err;
+  }
+}
 
 /** Records an audio stream with MediaRecorder (WebM/Opus), metering its level. */
 function recorderCapture(stream: MediaStream): AudioCapture {
@@ -50,9 +69,17 @@ function recorderCapture(stream: MediaStream): AudioCapture {
   };
 }
 
-/** Records Windows desktop (loopback) audio through getDisplayMedia and MediaRecorder. */
+/**
+ * Records what is transcribed: Windows desktop (loopback) audio through getDisplayMedia, or
+ * the chosen input device as it is, without echo cancellation, noise suppression or gain.
+ */
 export const browserDesktopAudio: DesktopAudioCapture = {
-  async open(): Promise<AudioCapture> {
+  async open(source = null): Promise<AudioCapture> {
+    if (source) {
+      return recorderCapture(
+        await openInput(source, { echoCancellation: false, noiseSuppression: false, autoGainControl: false }),
+      );
+    }
     // getDisplayMedia needs a video source to be granted; discard it and keep only the audio.
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     stream.getVideoTracks().forEach((t) => {
@@ -67,10 +94,29 @@ export const browserDesktopAudio: DesktopAudioCapture = {
   },
 };
 
-/** Records the default microphone, for a Session's Mic Track. */
+/** Records the chosen (or default) microphone, for a Session's Mic Track. */
 export const browserMicAudio: MicAudioCapture = {
-  async open(): Promise<AudioCapture> {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    return recorderCapture(stream);
+  async open(device = null): Promise<AudioCapture> {
+    return recorderCapture(await openInput(device));
+  },
+};
+
+/** Windows' own aliases for the default devices; the settings offer a default of their own. */
+const ALIASES = new Set(['default', 'communications']);
+
+/** Lists audio inputs. Labels stay blank until a microphone has been allowed once, so ask first. */
+export const browserAudioInputs: AudioInputs = {
+  async list(): Promise<AudioDevice[]> {
+    const inputs = async () =>
+      (await navigator.mediaDevices.enumerateDevices()).filter(
+        (d) => d.kind === 'audioinput' && !ALIASES.has(d.deviceId),
+      );
+    let devices = await inputs();
+    if (devices.some((d) => !d.label)) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }).catch(() => null);
+      stream?.getTracks().forEach((t) => t.stop());
+      devices = await inputs();
+    }
+    return devices.map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Input ${i + 1}` }));
   },
 };

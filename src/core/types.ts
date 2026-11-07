@@ -73,6 +73,20 @@ export interface VocabularyEntry {
   heardIn: HeardIn[];
 }
 
+/** An audio input device as the system lists it; the label is kept to name it when unplugged. */
+export interface AudioDevice {
+  deviceId: string;
+  label: string;
+}
+
+/** Which devices a Session records from; null is the system's own choice. */
+export interface AudioSettings {
+  /** What is transcribed: null is all system audio (loopback); else an input device, e.g. Stereo Mix. */
+  desktopSource: AudioDevice | null;
+  /** The Mic Track's microphone: null is the system default. */
+  microphone: AudioDevice | null;
+}
+
 export type TranscriptListener = (sessionId: number, update: LiveUtterance) => void;
 
 /** One labelled fact in a Detail Module's section, e.g. root ك.ت.ب. */

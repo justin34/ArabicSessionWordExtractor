@@ -1,8 +1,12 @@
 import { render } from '@testing-library/react';
 import { App } from '../../src/renderer/App';
 import {
+  DeviceUnavailableError,
   NoDesktopAudioError,
   type AudioCapture,
+  type AudioDevice,
+  type AudioInputs,
+  type AudioSettings,
   type Bridge,
   type DemoFeed,
   type DesktopAudioCapture,
@@ -43,6 +47,10 @@ export class FakeBridge implements Bridge {
   /** Stored Transcripts by Session id. */
   transcripts = new Map<number, Utterance[]>();
   transcriptError: Error | null = null;
+  /** Stored audio settings; each save is recorded. */
+  audio: AudioSettings = { desktopSource: null, microphone: null };
+  savedAudio: AudioSettings[] = [];
+  saveAudioError: Error | null = null;
   private listeners = new Map<number, (u: LiveUtterance) => void>();
   private nextId: number;
 
@@ -110,6 +118,15 @@ export class FakeBridge implements Bridge {
     if (this.guideError) throw this.guideError;
     return this.sessionGuides.get(sessionId) ?? null;
   }
+  async audioSettings() {
+    return this.audio;
+  }
+  async saveAudioSettings(settings: AudioSettings) {
+    if (this.saveAudioError) throw this.saveAudioError;
+    this.savedAudio.push(settings);
+    this.audio = settings;
+    return settings;
+  }
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void) {
     this.listeners.set(sessionId, onUpdate);
     return () => void this.listeners.delete(sessionId);
@@ -126,9 +143,15 @@ export class FakeCapture implements DesktopAudioCapture, MicAudioCapture {
   levelValue = 0;
   opened = 0;
   stopped = 0;
+  /** The device each open asked for; null is the system's own. */
+  openedWith: Array<AudioDevice | null> = [];
+  /** Device ids that are not connected. */
+  unplugged = new Set<string>();
   onChunk: ((c: Uint8Array) => void) | null = null;
 
-  async open(): Promise<AudioCapture> {
+  async open(device: AudioDevice | null = null): Promise<AudioCapture> {
+    this.openedWith.push(device);
+    if (device && this.unplugged.has(device.deviceId)) throw new DeviceUnavailableError(device);
     if (this.noAudio) throw new NoDesktopAudioError();
     if (this.openError) throw this.openError;
     this.opened++;
@@ -145,6 +168,16 @@ export class FakeCapture implements DesktopAudioCapture, MicAudioCapture {
   }
 }
 
+/** A fixed list of audio inputs. */
+export class FakeAudioInputs implements AudioInputs {
+  constructor(public devices: AudioDevice[] = []) {}
+  listed = 0;
+  async list() {
+    this.listed++;
+    return [...this.devices];
+  }
+}
+
 /** A demo feed the test drives by hand. */
 export class ManualDemoFeed {
   emit: (u: LiveUtterance) => void = () => {};
@@ -158,13 +191,20 @@ export class ManualDemoFeed {
 }
 
 export function renderApp(
-  opts: { bridge?: FakeBridge; capture?: FakeCapture; mic?: FakeCapture; demo?: ManualDemoFeed } = {},
+  opts: {
+    bridge?: FakeBridge;
+    capture?: FakeCapture;
+    mic?: FakeCapture;
+    inputs?: FakeAudioInputs;
+    demo?: ManualDemoFeed;
+  } = {},
 ) {
   const bridge = opts.bridge ?? new FakeBridge();
   const capture = opts.capture ?? new FakeCapture();
   const mic = opts.mic ?? new FakeCapture();
+  const inputs = opts.inputs ?? new FakeAudioInputs();
   const view = render(
-    <App bridge={bridge} capture={capture} micCapture={mic} demoFeed={opts.demo?.feed} />,
+    <App bridge={bridge} capture={capture} micCapture={mic} audioInputs={inputs} demoFeed={opts.demo?.feed} />,
   );
-  return { bridge, capture, mic, ...view };
+  return { bridge, capture, mic, inputs, ...view };
 }

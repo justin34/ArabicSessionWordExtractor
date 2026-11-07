@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   wordDetails: (lemmaId: number, surface?: string) => ipcRenderer.invoke('words:details', lemmaId, surface),
   wordCard: (lemmaId: number) => ipcRenderer.invoke('guides:wordCard', lemmaId),
   sessionGuide: (sessionId: number) => ipcRenderer.invoke('guides:sessionGuide', sessionId),
+  audioSettings: () => ipcRenderer.invoke('settings:audio'),
+  saveAudioSettings: (settings: unknown) => ipcRenderer.invoke('settings:setAudio', settings),
   /** Live Transcript updates for every recording Session; returns an unsubscribe. */
   onTranscriptUpdate: (listener: TranscriptListener) => {
     const handler = (_event: IpcRendererEvent, ...[id, update]: Parameters<TranscriptListener>) =>

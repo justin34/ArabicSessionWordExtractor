@@ -5,6 +5,7 @@ import { WordDetailsBuilder, type DetailModuleConfig } from './details/wordDetai
 import { StudyGuides } from './guides/studyGuides';
 import type { Providers } from './providers';
 import { Sessions } from './sessions';
+import { Settings } from './settings';
 import { Store } from './store';
 import type { SessionGuide, VocabularyEntry, WordCard, WordDetails } from './types';
 
@@ -32,6 +33,8 @@ export interface App {
   vocabulary: Vocabulary;
   words: Words;
   guides: Guides;
+  /** Stored settings, e.g. which audio devices to record from. */
+  settings: Settings;
   /** Closes storage. Word Cards still being rebuilt are left as they were; wait for `guides.idle()` to finish them. */
   close(): void;
 }
@@ -65,5 +68,6 @@ export function createApp({ dataDir, providers, detailModules }: AppOptions): Ap
     studyGuides.stop();
     store.close();
   };
-  return { sessions, vocabulary, words, guides, close };
+  const settings = new Settings(join(dataDir, 'settings.json'));
+  return { sessions, vocabulary, words, guides, settings, close };
 }
