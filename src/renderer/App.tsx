@@ -13,11 +13,13 @@ import { NoDesktopAudioError } from './bridge';
 import { EmptyState } from './components/EmptyState';
 import { LiveView } from './components/LiveView';
 import { ReplayPlaceholder } from './components/ReplayPlaceholder';
+import { SessionGuideView } from './components/SessionGuideView';
 import { SessionList } from './components/SessionList';
 import { ScreenHeader } from './components/ScreenHeader';
 import { Sidebar, type Destination } from './components/Sidebar';
 import { StartPanel } from './components/StartPanel';
 import { VocabularyList } from './components/VocabularyList';
+import { WordCardView } from './components/WordCardView';
 import { isDemoKey, sessionKey } from './sessionKey';
 import { applyUpdate } from './transcript';
 import { useNow } from './useNow';
@@ -33,7 +35,14 @@ export interface AppProps {
 type Route =
   | { name: Destination }
   | { name: 'live'; sessionKey: string }
-  | { name: 'replay'; session: ListedSession };
+  | { name: 'replay'; session: ListedSession }
+  | { name: 'word-card'; lemmaId: number; back: Route };
+
+/** The sidebar destination a screen belongs to. */
+function destinationOf(route: Route): Destination {
+  if (route.name === 'word-card') return destinationOf(route.back);
+  return route.name === 'live' || route.name === 'replay' ? 'sessions' : route.name;
+}
 
 interface ActiveRecording {
   sessionId: number;
@@ -234,8 +243,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
   }
 
   const goSessions = () => setRoute({ name: 'sessions' });
-  const sidebarActive: Destination =
-    route.name === 'live' || route.name === 'replay' ? 'sessions' : route.name;
+  const sidebarActive = destinationOf(route);
   const liveSession =
     route.name === 'live' ? sessions.find((s) => sessionKey(s) === route.sessionKey) : undefined;
   const audioCapture = active.current?.capture;
@@ -247,6 +255,9 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
     (lemmaId: number, surface: string) => bridge.wordDetails(lemmaId, surface),
     [bridge],
   );
+  const loadSessionGuide = useCallback((sessionId: number) => bridge.sessionGuide(sessionId), [bridge]);
+  const loadWordCard = useCallback((lemmaId: number) => bridge.wordCard(lemmaId), [bridge]);
+  const openWordCard = (lemmaId: number) => setRoute({ name: 'word-card', lemmaId, back: route });
 
   return (
     <div className="app">
@@ -281,12 +292,31 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
             loadWordDetails={loadWordDetails}
           />
         )}
-        {route.name === 'replay' && <ReplayPlaceholder onBack={goSessions} />}
+        {route.name === 'replay' &&
+          (route.session.isDemo ? (
+            <ReplayPlaceholder onBack={goSessions} />
+          ) : (
+            <SessionGuideView
+              session={route.session}
+              loadGuide={loadSessionGuide}
+              onOpenWord={openWordCard}
+              onBack={goSessions}
+            />
+          ))}
+        {route.name === 'word-card' && (
+          <WordCardView
+            lemmaId={route.lemmaId}
+            loadCard={loadWordCard}
+            backLabel={route.back.name === 'vocabulary' ? 'Back to Vocabulary' : 'Back to Session Guide'}
+            onBack={() => setRoute(route.back)}
+          />
+        )}
         {route.name === 'vocabulary' && (
           <VocabularyList
             entries={vocabulary}
             query={vocabularyQuery}
             onQueryChange={setVocabularyQuery}
+            onOpenWord={openWordCard}
           />
         )}
         {route.name === 'settings' && (

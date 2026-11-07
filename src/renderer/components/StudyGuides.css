@@ -1,0 +1,70 @@
+/* Session Guide and Word Card screens. */
+.guide__heading {
+  margin-block-end: var(--space-4);
+}
+.guide__heading p {
+  margin: var(--space-1) 0 0;
+}
+.guide__muted {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.guide__summary {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-muted);
+}
+.guide__group {
+  margin-block-end: var(--space-5);
+}
+.guide__group-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.guide__words {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.guide__word {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  cursor: pointer;
+  text-align: center;
+}
+.guide__word:hover {
+  border-color: var(--color-accent);
+}
+.guide__word:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.guide__lemma {
+  font-family: var(--font-arabic);
+  font-size: var(--text-xl);
+  line-height: 1.8;
+}
+.guide__gloss {
+  font-weight: 600;
+}
+.card__lemma {
+  font-family: var(--font-arabic);
+  font-size: var(--text-arabic);
+  font-weight: 400;
+  line-height: 1.8;
+  /* Lines up with the English below it, not the far edge of the screen. */
+  text-align: left;
+}
+.card__sections {
+  max-width: 44rem;
+}

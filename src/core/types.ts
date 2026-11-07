@@ -117,3 +117,41 @@ export interface WordDetails {
   lemma: string;
   sections: DetailSection[];
 }
+
+/**
+ * A Lemma's read-only study guide, built from the enabled Detail Modules. Generated when
+ * the Lemma first enters the Vocabulary; rebuilt when a Session it was heard in ends.
+ */
+export interface WordCard extends WordDetails {
+  /** When the card was first generated. */
+  generatedAt: string;
+  /** When its sections were last rebuilt. */
+  updatedAt: string;
+}
+
+/** One new Lemma in a Session Guide; its Word Card has the same Lemma id. */
+export interface SessionGuideWord {
+  lemmaId: number;
+  lemma: string;
+  /** The word's quick gloss as heard in the Session, else its stem gloss; empty when it has none. */
+  gloss: string;
+  partOfSpeech: string | null;
+  /** Times heard in this Session. */
+  count: number;
+}
+
+/** New Lemmas of one kind, e.g. verbs. */
+export interface SessionGuideGroup {
+  title: string;
+  words: SessionGuideWord[];
+}
+
+/** A Session's read-only study guide, generated when the Session ends. */
+export interface SessionGuide {
+  sessionId: number;
+  generatedAt: string;
+  /** Distinct Lemmas heard in the Session, new or not. */
+  lemmasHeard: number;
+  /** Lemmas first heard in this Session, grouped by part of speech, in the order heard. */
+  groups: SessionGuideGroup[];
+}

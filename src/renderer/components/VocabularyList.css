@@ -35,10 +35,21 @@
   background: var(--color-surface);
 }
 .vocab-row__lemma {
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-1);
+  background: none;
+  cursor: pointer;
   font-family: var(--font-arabic);
   font-size: var(--text-xl);
   line-height: 1.9;
   text-align: center;
+}
+.vocab-row__lemma:hover {
+  color: var(--color-accent);
+}
+.vocab-row__lemma:focus-visible {
+  outline: 2px solid var(--color-accent);
 }
 .vocab-row__body {
   display: flex;

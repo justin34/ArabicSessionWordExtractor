@@ -26,11 +26,14 @@ export function VocabularyList({
   entries,
   query,
   onQueryChange,
+  onOpenWord,
 }: {
   /** Null while loading. */
   entries: VocabularyEntry[] | null;
   query: string;
   onQueryChange: (query: string) => void;
+  /** Opens a Lemma's Word Card. */
+  onOpenWord: (lemmaId: number) => void;
 }) {
   const shown = entries?.filter((e) => matchesVocabulary(e, query)) ?? [];
   return (
@@ -64,9 +67,16 @@ export function VocabularyList({
           <ul className="vocab-list" aria-label="Vocabulary list">
             {shown.map((e) => (
               <li key={e.lemmaId} className="vocab-row" aria-label={e.lemma}>
-                <span className="vocab-row__lemma" lang="ar" dir="rtl">
+                <button
+                  type="button"
+                  className="vocab-row__lemma"
+                  lang="ar"
+                  dir="rtl"
+                  aria-label={`Word Card for ${e.lemma}`}
+                  onClick={() => onOpenWord(e.lemmaId)}
+                >
                   {e.lemma}
-                </span>
+                </button>
                 <div className="vocab-row__body">
                   <div className="vocab-row__gloss">
                     {e.stemGloss ? readableGloss(e.stemGloss) : <span className="vocab-row__muted">No gloss yet</span>}

@@ -3,6 +3,7 @@ import { extname, join } from 'node:path';
 import { alignToTokens, cleanSurface, isWord } from './analysis/align';
 import { AudioChannel } from './audioChannel';
 import { quickGloss } from './dictionary/gloss';
+import type { StudyGuideHooks } from './guides/studyGuides';
 import type { DictionaryEntry, Providers, TokenAnalysis } from './providers';
 import type { HeardWord, Store } from './store';
 import type { LiveUtterance, Session, Token, TranscriptListener, Utterance } from './types';
@@ -41,6 +42,8 @@ export class Sessions {
     private readonly store: Store,
     private readonly providers: Providers,
     private readonly recordingsDir: string,
+    /** Told of Lemmas heard and Sessions ended, for Word Cards and Session Guides. */
+    private readonly guides?: StudyGuideHooks,
   ) {
     mkdirSync(recordingsDir, { recursive: true });
     // No Session can still be live when the app opens; any left recording died with the app.
@@ -72,7 +75,10 @@ export class Sessions {
     if (live.transcribing) live.audio.push(chunk);
   }
 
-  /** Ends the recording, waits for the Transcript to be finished, and completes the Session. */
+  /**
+   * Ends the recording, waits for the Transcript to be finished, completes the Session
+   * and generates its Session Guide.
+   */
   async stop(sessionId: number): Promise<Session> {
     const live = this.live.get(sessionId);
     if (!live) return this.store.getSession(sessionId);
@@ -81,7 +87,9 @@ export class Sessions {
     await live.transcribed;
     // Translations and analyses started by the last Utterances finish before the Session completes.
     while (live.followUps.size > 0) await Promise.all(live.followUps);
-    return this.store.completeSession(sessionId, new Date().toISOString());
+    const session = this.store.completeSession(sessionId, new Date().toISOString());
+    await this.guides?.sessionEnded(sessionId);
+    return session;
   }
 
   /** Stops every live Session, e.g. when the app quits. */
@@ -214,24 +222,30 @@ export class Sessions {
         tokenPosition: positions[i],
       }));
       const lemmaIds = this.store.recordHeardWords(u.utteranceId, u.heardAt, words);
-      // A Token covering several analyzed words takes the first one's Lemma and gloss.
-      const tokenLemmas = new Map<number, number>();
-      const tokenAnalyses = new Map<number, TokenAnalysis>();
-      positions.forEach((p, i) => {
-        if (p === null || tokenLemmas.has(p)) return;
-        tokenLemmas.set(p, lemmaIds[i]);
-        tokenAnalyses.set(p, analyses[i]);
-      });
-      if (tokenLemmas.size === 0) return;
-      const glosses = await this.glosses(u, tokenAnalyses);
-      this.store.setTokenGlosses(u.utteranceId, glosses);
-      this.update(u, {
-        tokens: tokens.map((t, i) => ({
-          ...t,
-          lemmaId: tokenLemmas.get(i) ?? t.lemmaId,
-          gloss: glosses.get(i) ?? t.gloss,
-        })),
-      });
+      // Lemmas new to the Vocabulary get their Word Card alongside the glosses.
+      const wordCards = this.guides?.lemmasHeard(lemmaIds);
+      try {
+        // A Token covering several analyzed words takes the first one's Lemma and gloss.
+        const tokenLemmas = new Map<number, number>();
+        const tokenAnalyses = new Map<number, TokenAnalysis>();
+        positions.forEach((p, i) => {
+          if (p === null || tokenLemmas.has(p)) return;
+          tokenLemmas.set(p, lemmaIds[i]);
+          tokenAnalyses.set(p, analyses[i]);
+        });
+        if (tokenLemmas.size === 0) return;
+        const glosses = await this.glosses(u, tokenAnalyses);
+        this.store.setTokenGlosses(u.utteranceId, glosses);
+        this.update(u, {
+          tokens: tokens.map((t, i) => ({
+            ...t,
+            lemmaId: tokenLemmas.get(i) ?? t.lemmaId,
+            gloss: glosses.get(i) ?? t.gloss,
+          })),
+        });
+      } finally {
+        await wordCards;
+      }
     } catch (err) {
       console.error(`Arabic analysis failed for an Utterance in Session ${u.sessionId}:`, err);
     }

@@ -1,6 +1,6 @@
-import type { LiveUtterance, Session, VocabularyEntry, WordDetails } from '../core/types';
+import type { LiveUtterance, Session, SessionGuide, VocabularyEntry, WordCard, WordDetails } from '../core/types';
 
-export type { LiveUtterance, VocabularyEntry, WordDetails };
+export type { LiveUtterance, SessionGuide, VocabularyEntry, WordCard, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -17,6 +17,10 @@ export interface Bridge {
   listVocabulary(): Promise<VocabularyEntry[]>;
   /** The word panel's Detail Module sections for a Lemma; null when it is not in the Vocabulary. */
   wordDetails(lemmaId: number, surface?: string): Promise<WordDetails | null>;
+  /** A Lemma's Word Card; null when it has none. */
+  wordCard(lemmaId: number): Promise<WordCard | null>;
+  /** A completed Session's Session Guide; null when it has none. */
+  sessionGuide(sessionId: number): Promise<SessionGuide | null>;
   /** Live transcript for a real Session. Nothing is connected to it yet. */
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void): Unsubscribe;
 }
