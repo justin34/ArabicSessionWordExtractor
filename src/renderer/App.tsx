@@ -74,12 +74,20 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
     setTranscripts((t) => ({ ...t, [key]: applyUpdate(t[key] ?? [], u) }));
   }, []);
 
-  // Live transcript for a real Session being viewed.
+  // Live transcript of the Session this window is recording, kept while the learner
+  // looks elsewhere so Live View is complete on return.
+  useEffect(() => {
+    if (activeId === null) return;
+    const key = String(activeId);
+    return bridge.subscribeTranscript(activeId, (u) => pushUpdate(key, u));
+  }, [bridge, activeId, pushUpdate]);
+
+  // Any other real Session being viewed live.
   const liveKey = route.name === 'live' ? route.sessionKey : null;
   useEffect(() => {
-    if (liveKey === null || isDemoKey(liveKey)) return;
+    if (liveKey === null || isDemoKey(liveKey) || liveKey === String(activeId)) return;
     return bridge.subscribeTranscript(Number(liveKey), (u) => pushUpdate(liveKey, u));
-  }, [bridge, liveKey, pushUpdate]);
+  }, [bridge, liveKey, activeId, pushUpdate]);
 
   // Stop any demo feeds if the app unmounts.
   useEffect(() => {

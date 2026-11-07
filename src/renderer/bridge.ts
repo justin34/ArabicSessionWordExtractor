@@ -1,16 +1,6 @@
-import type { Session, Token } from '../core/types';
+import type { LiveUtterance, Session } from '../core/types';
 
-/** A transcript update streamed to Live View. Re-sending the same id replaces that Utterance. */
-export interface LiveUtterance {
-  id: string;
-  isFinal: boolean;
-  /** Arabic text (all the learner sees while interim). */
-  text: string;
-  /** Sentence translation; empty while interim. */
-  translation: string;
-  /** Word columns with glosses; empty while interim. */
-  tokens: Token[];
-}
+export type { LiveUtterance };
 
 export type Unsubscribe = () => void;
 

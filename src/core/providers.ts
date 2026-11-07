@@ -1,13 +1,26 @@
 /** The four swappable provider interfaces the Session pipeline is built on. */
 
-export interface SttEvent {
-  type: 'interim' | 'final';
+/** One recognized word, timed from the start of the audio stream. */
+export interface SttWord {
   text: string;
   startMs: number;
   endMs: number;
 }
 
-/** Streaming speech-to-text: audio in, interim and final text with timings out. */
+/**
+ * One whole Utterance as recognized so far. Interim events repeat the Utterance's text
+ * as it grows; exactly one final event then closes it, and the next event starts a new one.
+ */
+export interface SttEvent {
+  type: 'interim' | 'final';
+  text: string;
+  startMs: number;
+  endMs: number;
+  /** The Utterance's words in order; adapters fill this on final events. */
+  words?: SttWord[];
+}
+
+/** Streaming speech-to-text: audio in, interim and final Utterances with word timings out. */
 export interface SpeechToText {
   transcribe(audio: AsyncIterable<Uint8Array>): AsyncIterable<SttEvent>;
 }

@@ -1,6 +1,9 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session } from 'electron';
 import { join } from 'node:path';
 import { createApp, type App } from '../core/app';
+import type { SpeechToText } from '../core/providers';
+import { DeepgramSpeechToText } from '../core/stt/deepgram';
+import { SonioxSpeechToText } from '../core/stt/soniox';
 import {
   FakeArabicAnalyzer,
   FakeDictionary,
@@ -26,7 +29,24 @@ function requireChunk(value: unknown): Uint8Array {
   return value;
 }
 
+/**
+ * Soniox first, Deepgram as the fallback (GLOSSARY, STT provider). Keys come from the
+ * environment until the settings screen exists; with neither, Transcripts stay empty.
+ */
+function speechToTextFromEnv(env: NodeJS.ProcessEnv): SpeechToText {
+  if (env.SONIOX_API_KEY) return new SonioxSpeechToText({ apiKey: env.SONIOX_API_KEY });
+  if (env.DEEPGRAM_API_KEY) return new DeepgramSpeechToText({ apiKey: env.DEEPGRAM_API_KEY });
+  console.warn('No SONIOX_API_KEY or DEEPGRAM_API_KEY set: Sessions record without a transcript.');
+  return new FakeSpeechToText([]);
+}
+
 function registerIpc(sessions: App['sessions']): void {
+  // Every window hears every live Session; the renderer picks the one it shows.
+  sessions.subscribe((sessionId, update) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('transcript:update', sessionId, update);
+    }
+  });
   ipcMain.handle('sessions:start', () => sessions.start());
   ipcMain.handle('sessions:appendDesktopAudio', (_event, id: unknown, chunk: unknown) =>
     sessions.appendDesktopAudio(requireSessionId(id), requireChunk(chunk)),
@@ -65,12 +85,11 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(() => {
-  // Walking skeleton: real Deepgram, Google and CAMeL adapters arrive in later tickets.
-  // Recording is real; transcription runs on the fakes, so Transcripts stay empty for now.
+  // Real Google and CAMeL adapters arrive in later tickets; until then those run on fakes.
   core = createApp({
     dataDir: app.getPath('userData'),
     providers: {
-      speechToText: new FakeSpeechToText([]),
+      speechToText: speechToTextFromEnv(process.env),
       translator: new FakeTranslator(),
       arabicAnalyzer: new FakeArabicAnalyzer(),
       dictionary: new FakeDictionary(),

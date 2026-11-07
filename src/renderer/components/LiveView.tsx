@@ -80,7 +80,7 @@ export function LiveView({
             <EmptyState title="Listening…">
               {session.isDemo
                 ? 'The demo transcript will start in a moment.'
-                : 'The transcript appears here once speech-to-text is connected.'}
+                : 'Speech-to-text shows the Arabic here as it is spoken.'}
             </EmptyState>
           )}
           {utterances.map((u) => (
