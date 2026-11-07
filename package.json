@@ -7,6 +7,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "dev": "node scripts/dev.mjs",
+    "build:helper": "node scripts/build-camel-helper.mjs",
     "build": "tsc -p tsconfig.build.json && vite build",
     "start": "npm run build && electron .",
     "test": "vitest run"

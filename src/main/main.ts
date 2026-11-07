@@ -2,7 +2,8 @@ import { app, BrowserWindow, desktopCapturer, ipcMain, session } from 'electron'
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp, type App } from '../core/app';
-import type { SpeechToText, Translator } from '../core/providers';
+import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
+import type { ArabicAnalyzer, SpeechToText, Translator } from '../core/providers';
 import { DeepgramSpeechToText } from '../core/stt/deepgram';
 import { SonioxSpeechToText } from '../core/stt/soniox';
 import { GoogleTranslator } from '../core/translation/google';
@@ -16,6 +17,7 @@ import {
 const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
 
 let core: App | undefined;
+let analyzer: CamelArabicAnalyzer | undefined;
 
 function requireSessionId(value: unknown): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
@@ -47,6 +49,28 @@ function translatorFromEnv(env: NodeJS.ProcessEnv): Translator {
   if (env.GOOGLE_TRANSLATE_API_KEY) return new GoogleTranslator({ apiKey: env.GOOGLE_TRANSLATE_API_KEY });
   console.warn('No GOOGLE_TRANSLATE_API_KEY set: Utterances show without a sentence translation.');
   return new FakeTranslator();
+}
+
+/**
+ * The CAMeL helper bundle (GLOSSARY, Installer size): built into vendor/camel-helper by
+ * `npm run build:helper`, and shipped as resources/camel-helper in packaged builds. It is
+ * started here, with the app, so its model is loaded before the first sentence.
+ */
+function arabicAnalyzerFromBundle(): ArabicAnalyzer {
+  const bundleDir = app.isPackaged
+    ? join(process.resourcesPath, 'camel-helper')
+    : join(app.getAppPath(), 'vendor', 'camel-helper');
+  const script = app.isPackaged
+    ? join(bundleDir, 'analyze.py')
+    : join(app.getAppPath(), 'helper', 'camel', 'analyze.py');
+  const helper = camelHelperCommand(bundleDir, script);
+  if (!existsSync(helper.command)) {
+    console.warn(`No Arabic analysis helper in ${bundleDir} (npm run build:helper): words are not analyzed.`);
+    return new FakeArabicAnalyzer();
+  }
+  analyzer = new CamelArabicAnalyzer({ helper });
+  analyzer.start();
+  return analyzer;
 }
 
 function registerIpc(sessions: App['sessions']): void {
@@ -106,13 +130,13 @@ function loadDevEnvFile(): void {
 
 void app.whenReady().then(() => {
   loadDevEnvFile();
-  // The real CAMeL and dictionary adapters arrive in later tickets; until then those run on fakes.
+  // The real dictionary adapter arrives in a later ticket; until then it runs on a fake.
   core = createApp({
     dataDir: app.getPath('userData'),
     providers: {
       speechToText: speechToTextFromEnv(process.env),
       translator: translatorFromEnv(process.env),
-      arabicAnalyzer: new FakeArabicAnalyzer(),
+      arabicAnalyzer: arabicAnalyzerFromBundle(),
       dictionary: new FakeDictionary(),
     },
   });
@@ -123,8 +147,11 @@ void app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   // Complete any Session still recording before the database closes.
-  void (core?.sessions.stopAll() ?? Promise.resolve()).finally(() => {
-    core?.close();
-    app.quit();
-  });
+  // The helper shuts down with the app.
+  void (core?.sessions.stopAll() ?? Promise.resolve())
+    .then(() => analyzer?.close())
+    .finally(() => {
+      core?.close();
+      app.quit();
+    });
 });

@@ -3,3 +3,4 @@ dist/
 *.db
 recordings/
 .env
+vendor/
