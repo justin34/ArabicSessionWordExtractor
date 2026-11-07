@@ -1,7 +1,8 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, session } from 'electron';
+import { app, BrowserWindow, desktopCapturer, ipcMain, protocol, session } from 'electron';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp, type App } from '../core/app';
+import { audioFileResponse } from '../core/audioFile';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
 import { readDetailModuleConfig } from '../core/details/wordDetails';
 import { SqliteDictionary } from '../core/dictionary/sqlite';
@@ -122,6 +123,7 @@ function registerIpc({ sessions, vocabulary, words, guides }: App): void {
   );
   ipcMain.handle('sessions:stop', (_event, id: unknown) => sessions.stop(requireSessionId(id)));
   ipcMain.handle('sessions:list', () => sessions.list());
+  ipcMain.handle('sessions:transcript', (_event, id: unknown) => sessions.transcript(requireSessionId(id)));
   ipcMain.handle('vocabulary:list', () => vocabulary.list());
   ipcMain.handle('words:details', async (_event, lemmaId: unknown, surface: unknown) =>
     (await words.details(requireLemmaId(lemmaId), optionalSurface(surface))) ?? null,
@@ -131,6 +133,26 @@ function registerIpc({ sessions, vocabulary, words, guides }: App): void {
     'guides:sessionGuide',
     (_event, id: unknown) => guides.sessionGuide(requireSessionId(id)) ?? null,
   );
+}
+
+/**
+ * Replay reads Session audio from `session-audio://desktop/<id>`: only Desktop Tracks of
+ * stored Sessions, never an arbitrary path. Ranges are honoured so the player can seek.
+ */
+const AUDIO_SCHEME = 'session-audio';
+protocol.registerSchemesAsPrivileged([
+  { scheme: AUDIO_SCHEME, privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
+]);
+
+function serveSessionAudio({ sessions }: App): void {
+  protocol.handle(AUDIO_SCHEME, (request) => {
+    const url = new URL(request.url);
+    const id = Number(url.pathname.replace(/^\//, ''));
+    const path =
+      url.hostname === 'desktop' && Number.isInteger(id) && id > 0 ? sessions.desktopTrackPath(id) : undefined;
+    if (!path) return new Response('No such track', { status: 404 });
+    return audioFileResponse(path, request.headers.get('range'));
+  });
 }
 
 /** Grants getDisplayMedia the primary screen plus Windows loopback (desktop) audio. */
@@ -188,6 +210,7 @@ void app.whenReady().then(() => {
     },
   });
   registerIpc(core);
+  serveSessionAudio(core);
   allowDesktopAudioCapture();
   createWindow();
 });

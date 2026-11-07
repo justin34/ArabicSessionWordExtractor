@@ -53,12 +53,13 @@ describe('Session List', () => {
     expect(within(row).getByText('0:08')).toBeTruthy();
   });
 
-  it('opens a completed Session on its Session Guide, noting Replay is to come, with a way back', async () => {
+  it('opens a completed Session on its Replay View, with a way back', async () => {
     const user = userEvent.setup();
     renderApp({ bridge: new FakeBridge([session({ id: 1 })]) });
 
     await user.click(await screen.findByRole('button', { name: /open session/i }));
-    expect(screen.getByText(/replay coming soon/i)).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Replay', selected: true })).toBeTruthy();
+    expect(await screen.findByText('No Transcript')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: /back/i }));
     expect(screen.getByRole('heading', { name: 'Sessions' })).toBeTruthy();

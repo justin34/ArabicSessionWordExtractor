@@ -19,11 +19,25 @@ export function UtteranceView({
   utterance,
   selectedWord = null,
   onSelectWord,
+  replay,
 }: {
   utterance: LiveUtterance;
   /** Position of the word whose panel is open, if it is in this Utterance. */
   selectedWord?: number | null;
   onSelectWord?: (position: number) => void;
+  /**
+   * Set in Replay View: words show as columns even without glosses, the word being heard
+   * is highlighted, and clicking the sentence (or its time) seeks to it.
+   */
+  replay?: {
+    /** True while playback is inside this Utterance. */
+    current: boolean;
+    /** Position of the word being heard, if it is in this Utterance. */
+    currentWord: number | null;
+    /** When the Utterance starts, e.g. 1:05. */
+    time: string;
+    onSeek: () => void;
+  };
 }) {
   if (!utterance.isFinal) {
     return (
@@ -32,12 +46,43 @@ export function UtteranceView({
       </article>
     );
   }
+  const showWords = utterance.tokens.length > 0 && (replay !== undefined || utterance.tokens.some((t) => t.gloss));
+  const wordClass = (i: number) =>
+    ['word', i === selectedWord && 'word--selected', i === replay?.currentWord && 'word--current']
+      .filter(Boolean)
+      .join(' ');
   return (
-    <article className="utterance" data-state="final">
-      {utterance.tokens.some((t) => t.gloss) ? (
+    <article
+      className={replay?.current ? 'utterance utterance--current' : 'utterance'}
+      data-state="final"
+      aria-current={replay?.current ? 'true' : undefined}
+      // Clicking anywhere in the sentence but a word seeks; the time button does it from the keyboard.
+      onClick={
+        replay &&
+        ((e) => {
+          if (!(e.target as Element).closest('.word__button, .utterance__seek')) replay.onSeek();
+        })
+      }
+    >
+      {replay && (
+        <button
+          type="button"
+          className="utterance__seek"
+          aria-label={`Play from ${replay.time}`}
+          onClick={replay.onSeek}
+        >
+          {replay.time}
+        </button>
+      )}
+      {showWords ? (
         <div className="utterance__words" dir="rtl">
           {utterance.tokens.map((t, i) => (
-            <span key={i} className={i === selectedWord ? 'word word--selected' : 'word'} role="group">
+            <span
+              key={i}
+              className={wordClass(i)}
+              role="group"
+              aria-current={i === replay?.currentWord ? 'true' : undefined}
+            >
               {onSelectWord && isArabicWord(t.surface) ? (
                 <button
                   type="button"

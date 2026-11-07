@@ -13,9 +13,9 @@ import { NoDesktopAudioError } from './bridge';
 import { EmptyState } from './components/EmptyState';
 import { LiveView } from './components/LiveView';
 import { ReplayPlaceholder } from './components/ReplayPlaceholder';
-import { SessionGuideView } from './components/SessionGuideView';
 import { SessionList } from './components/SessionList';
 import { ScreenHeader } from './components/ScreenHeader';
+import { SessionView, type SessionTab } from './components/SessionView';
 import { Sidebar, type Destination } from './components/Sidebar';
 import { StartPanel } from './components/StartPanel';
 import { VocabularyList } from './components/VocabularyList';
@@ -35,7 +35,7 @@ export interface AppProps {
 type Route =
   | { name: Destination }
   | { name: 'live'; sessionKey: string }
-  | { name: 'replay'; session: ListedSession }
+  | { name: 'replay'; session: ListedSession; tab: SessionTab }
   | { name: 'word-card'; lemmaId: number; back: Route };
 
 /** The sidebar destination a screen belongs to. */
@@ -238,7 +238,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
     setRoute(
       s.status === 'recording'
         ? { name: 'live', sessionKey: sessionKey(s) }
-        : { name: 'replay', session: s },
+        : { name: 'replay', session: s, tab: 'replay' },
     );
   }
 
@@ -256,6 +256,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
     [bridge],
   );
   const loadSessionGuide = useCallback((sessionId: number) => bridge.sessionGuide(sessionId), [bridge]);
+  const loadTranscript = useCallback((sessionId: number) => bridge.transcript(sessionId), [bridge]);
   const loadWordCard = useCallback((lemmaId: number) => bridge.wordCard(lemmaId), [bridge]);
   const openWordCard = (lemmaId: number) => setRoute({ name: 'word-card', lemmaId, back: route });
 
@@ -296,8 +297,13 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
           (route.session.isDemo ? (
             <ReplayPlaceholder onBack={goSessions} />
           ) : (
-            <SessionGuideView
+            <SessionView
               session={route.session}
+              tab={route.tab}
+              onTabChange={(tab) => setRoute({ ...route, tab })}
+              audioUrl={bridge.desktopTrackUrl(route.session.id)}
+              loadTranscript={loadTranscript}
+              loadWordDetails={loadWordDetails}
               loadGuide={loadSessionGuide}
               onOpenWord={openWordCard}
               onBack={goSessions}

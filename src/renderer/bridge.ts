@@ -1,6 +1,14 @@
-import type { LiveUtterance, Session, SessionGuide, VocabularyEntry, WordCard, WordDetails } from '../core/types';
+import type {
+  LiveUtterance,
+  Session,
+  SessionGuide,
+  Utterance,
+  VocabularyEntry,
+  WordCard,
+  WordDetails,
+} from '../core/types';
 
-export type { LiveUtterance, SessionGuide, VocabularyEntry, WordCard, WordDetails };
+export type { LiveUtterance, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -13,6 +21,10 @@ export interface Bridge {
   appendDesktopAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
   stopSession(sessionId: number): Promise<Session>;
   listSessions(): Promise<Session[]>;
+  /** A Session's stored Transcript, in order. */
+  transcript(sessionId: number): Promise<Utterance[]>;
+  /** Where Replay loads a Session's Desktop Track from. */
+  desktopTrackUrl(sessionId: number): string;
   /** The whole Vocabulary, most recently first heard first. */
   listVocabulary(): Promise<VocabularyEntry[]>;
   /** The word panel's Detail Module sections for a Lemma; null when it is not in the Vocabulary. */

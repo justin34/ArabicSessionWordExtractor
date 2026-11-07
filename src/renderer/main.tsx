@@ -7,7 +7,7 @@ import { browserDesktopAudio } from './browserCapture';
 import { demoFeedForBuild } from './demoFeed';
 import './tokens.css';
 
-type PreloadApi = Omit<Bridge, 'subscribeTranscript'> & {
+type PreloadApi = Omit<Bridge, 'subscribeTranscript' | 'desktopTrackUrl'> & {
   onTranscriptUpdate(listener: TranscriptListener): Unsubscribe;
 };
 
@@ -15,6 +15,8 @@ const { onTranscriptUpdate, ...api } = (window as unknown as { api: PreloadApi }
 
 const bridge: Bridge = {
   ...api,
+  // Served by the main process from the Session's stored Desktop Track.
+  desktopTrackUrl: (sessionId) => `session-audio://desktop/${sessionId}`,
   subscribeTranscript: (sessionId, onUpdate) =>
     onTranscriptUpdate((id, update) => {
       if (id === sessionId) onUpdate(update);

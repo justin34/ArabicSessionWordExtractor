@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('sessions:appendDesktopAudio', sessionId, chunk),
   stopSession: (sessionId: number) => ipcRenderer.invoke('sessions:stop', sessionId),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
+  transcript: (sessionId: number) => ipcRenderer.invoke('sessions:transcript', sessionId),
   listVocabulary: () => ipcRenderer.invoke('vocabulary:list'),
   wordDetails: (lemmaId: number, surface?: string) => ipcRenderer.invoke('words:details', lemmaId, surface),
   wordCard: (lemmaId: number) => ipcRenderer.invoke('guides:wordCard', lemmaId),
