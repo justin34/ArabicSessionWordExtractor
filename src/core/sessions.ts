@@ -111,15 +111,15 @@ export class Sessions {
 
   private async transcribe(sessionId: number, live: LiveSession): Promise<void> {
     // Interim text and the final Utterance it becomes share one live id.
-    let n = 0;
+    let utteranceIndex = 0;
     try {
       for await (const event of this.providers.speechToText.transcribe(live.audio)) {
-        const id = String(n);
+        const id = String(utteranceIndex);
         if (event.type === 'interim') {
           this.emit(sessionId, { id, isFinal: false, text: event.text, translation: '', tokens: [] });
           continue;
         }
-        n++;
+        utteranceIndex++;
         const translation = await this.providers.translator.translate(event.text);
         // Glosses and Lemmas attach once Arabic analysis is wired in.
         const tokens: Token[] = (event.words ?? []).map((w) => ({

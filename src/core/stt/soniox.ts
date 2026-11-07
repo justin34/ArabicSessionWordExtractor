@@ -1,5 +1,5 @@
 import type { SpeechToText, SttEvent, SttWord } from '../providers';
-import { connectWebSocket, streamOverSocket, type Connect } from './socket';
+import { connectWebSocket, streamOverSocket, utteranceEvent, type Connect } from './socket';
 
 const SONIOX_URL = 'wss://stt-rt.soniox.com/transcribe-websocket';
 
@@ -49,17 +49,6 @@ function toWords(tokens: SonioxToken[]): SttWord[] {
   return words;
 }
 
-function utterance(type: SttEvent['type'], tokens: SonioxToken[]): SttEvent {
-  const words = toWords(tokens);
-  const event: SttEvent = {
-    type,
-    text: words.map((w) => w.text).join(' '),
-    startMs: words[0]?.startMs ?? 0,
-    endMs: words.at(-1)?.endMs ?? 0,
-  };
-  return type === 'final' ? { ...event, words } : event;
-}
-
 /**
  * Soniox sends each token final exactly once, and marks the end of an Utterance with
  * `<end>`. This holds the final tokens of the open Utterance and turns each response
@@ -74,17 +63,17 @@ class SonioxAssembler {
       throw new Error(`Soniox error ${response.error_code}: ${response.error_message ?? ''}`);
     }
     const events: SttEvent[] = [];
-    const interims: SonioxToken[] = [];
+    const pending: SonioxToken[] = [];
     for (const t of response.tokens ?? []) {
       if (t.text === END_TOKEN) {
         events.push(...this.close());
       } else if (!CONTROL_TOKEN.test(t.text)) {
         if (t.is_final) this.finals.push(t);
-        else interims.push(t);
+        else pending.push(t);
       }
     }
-    const open = [...this.finals, ...interims];
-    if (open.some((t) => t.text.trim())) events.push(utterance('interim', open));
+    const open = [...this.finals, ...pending];
+    if (open.some((t) => t.text.trim())) events.push(utteranceEvent('interim', toWords(open)));
     return { events, done: response.finished === true };
   }
 
@@ -92,7 +81,7 @@ class SonioxAssembler {
   close(): SttEvent[] {
     const tokens = this.finals;
     this.finals = [];
-    return tokens.some((t) => t.text.trim()) ? [utterance('final', tokens)] : [];
+    return tokens.some((t) => t.text.trim()) ? [utteranceEvent('final', toWords(tokens))] : [];
   }
 }
 

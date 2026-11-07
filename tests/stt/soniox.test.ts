@@ -15,7 +15,7 @@ const start = () =>
   );
 
 describe('Soniox speech-to-text', () => {
-  it('opens a session for Arabic, streams the audio, then signals the end of audio', async () => {
+  it('opens a stream for Arabic, streams the audio, then signals the end of audio', async () => {
     const { audio, socket } = await start();
     socket.open();
     await settle();

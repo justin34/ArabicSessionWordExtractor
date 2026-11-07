@@ -1,4 +1,4 @@
-import type { SttEvent } from '../providers';
+import type { SttEvent, SttWord } from '../providers';
 
 interface SocketEvent {
   data?: unknown;
@@ -19,6 +19,17 @@ export type Connect = (url: string, protocols: string[]) => SocketLike;
 
 export const connectWebSocket: Connect = (url, protocols) =>
   new WebSocket(url, protocols) as unknown as SocketLike;
+
+/** An event for a whole Utterance made of these words; only final events carry the words. */
+export function utteranceEvent(type: SttEvent['type'], words: SttWord[]): SttEvent {
+  const event: SttEvent = {
+    type,
+    text: words.map((w) => w.text).join(' '),
+    startMs: words[0]?.startMs ?? 0,
+    endMs: words.at(-1)?.endMs ?? 0,
+  };
+  return type === 'final' ? { ...event, words } : event;
+}
 
 /** How one streaming service speaks over its socket. */
 export interface SocketProtocol {

@@ -1,5 +1,5 @@
 import type { SpeechToText, SttEvent, SttWord } from '../providers';
-import { connectWebSocket, streamOverSocket, type Connect } from './socket';
+import { connectWebSocket, streamOverSocket, utteranceEvent, type Connect } from './socket';
 
 /** No `encoding`: the Desktop Track is WebM/Opus, which Deepgram detects itself. */
 const PARAMS = {
@@ -22,16 +22,6 @@ interface DeepgramMessage {
   };
 }
 
-function utterance(type: SttEvent['type'], words: SttWord[]): SttEvent {
-  const event: SttEvent = {
-    type,
-    text: words.map((w) => w.text).join(' '),
-    startMs: words[0]?.startMs ?? 0,
-    endMs: words.at(-1)?.endMs ?? 0,
-  };
-  return type === 'final' ? { ...event, words } : event;
-}
-
 /**
  * Deepgram finalizes a stream in segments (`is_final`) and marks the end of speech with
  * `speech_final` or a later UtteranceEnd. This holds the final segments of the open
@@ -52,18 +42,18 @@ class DeepgramAssembler {
     }));
     if (!m.is_final) {
       const open = [...this.finals, ...words];
-      return { events: open.length > 0 ? [utterance('interim', open)] : [], done: false };
+      return { events: open.length > 0 ? [utteranceEvent('interim', open)] : [], done: false };
     }
     this.finals.push(...words);
     if (m.speech_final) return { events: this.close(), done: false };
-    return { events: this.finals.length > 0 ? [utterance('interim', this.finals)] : [], done: false };
+    return { events: this.finals.length > 0 ? [utteranceEvent('interim', this.finals)] : [], done: false };
   }
 
   /** Closes the open Utterance, if it has any words. */
   close(): SttEvent[] {
     const words = this.finals;
     this.finals = [];
-    return words.length > 0 ? [utterance('final', words)] : [];
+    return words.length > 0 ? [utteranceEvent('final', words)] : [];
   }
 }
 
