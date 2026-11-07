@@ -1,12 +1,17 @@
 import { render } from '@testing-library/react';
 import { App } from '../../src/renderer/App';
 import {
+  DeviceUnavailableError,
   NoDesktopAudioError,
   type AudioCapture,
+  type AudioDevice,
+  type AudioInputs,
+  type AudioSettings,
   type Bridge,
   type DemoFeed,
   type DesktopAudioCapture,
   type LiveUtterance,
+  type MicAudioCapture,
 } from '../../src/renderer/bridge';
 import type { Session, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails } from '../../src/core/types';
 
@@ -16,6 +21,7 @@ export function session(over: Partial<Session> & { id: number }): Session {
     endedAt: '2026-01-01T10:05:00.000Z',
     status: 'completed',
     desktopTrackPath: '',
+    micTrackPath: null,
     ...over,
   };
 }
@@ -25,6 +31,9 @@ export class FakeBridge implements Bridge {
   sessions: Session[];
   calls: string[] = [];
   chunks: Array<{ sessionId: number; chunk: Uint8Array }> = [];
+  micChunks: Array<{ sessionId: number; chunk: Uint8Array }> = [];
+  /** The options each startSession call was given, in order. */
+  startOptions: Array<{ mic: boolean } | undefined> = [];
   appendError: Error | null = null;
   vocabulary: VocabularyEntry[] = [];
   /** Word panel content by Lemma id. */
@@ -38,6 +47,10 @@ export class FakeBridge implements Bridge {
   /** Stored Transcripts by Session id. */
   transcripts = new Map<number, Utterance[]>();
   transcriptError: Error | null = null;
+  /** Stored audio settings; each save is recorded. */
+  audio: AudioSettings = { desktopSource: null, microphone: null };
+  savedAudio: AudioSettings[] = [];
+  saveAudioError: Error | null = null;
   private listeners = new Map<number, (u: LiveUtterance) => void>();
   private nextId: number;
 
@@ -46,12 +59,15 @@ export class FakeBridge implements Bridge {
     this.nextId = Math.max(0, ...initial.map((s) => s.id)) + 1;
   }
 
-  async startSession() {
+  async startSession(options?: { mic: boolean }) {
+    this.startOptions.push(options);
+    const id = this.nextId++;
     const s = session({
-      id: this.nextId++,
+      id,
       status: 'recording',
       endedAt: null,
       startedAt: new Date().toISOString(),
+      micTrackPath: options?.mic ? `session-${id}-mic.webm` : null,
     });
     this.sessions.unshift(s);
     this.calls.push(`start:${s.id}`);
@@ -60,6 +76,10 @@ export class FakeBridge implements Bridge {
   async appendDesktopAudio(sessionId: number, chunk: Uint8Array) {
     if (this.appendError) throw this.appendError;
     this.chunks.push({ sessionId, chunk });
+  }
+  async appendMicAudio(sessionId: number, chunk: Uint8Array) {
+    if (this.appendError) throw this.appendError;
+    this.micChunks.push({ sessionId, chunk });
   }
   async stopSession(sessionId: number) {
     this.calls.push(`stop:${sessionId}`);
@@ -78,6 +98,9 @@ export class FakeBridge implements Bridge {
   desktopTrackUrl(sessionId: number) {
     return `session-audio://desktop/${sessionId}`;
   }
+  micTrackUrl(sessionId: number) {
+    return `session-audio://mic/${sessionId}`;
+  }
   async listVocabulary() {
     return [...this.vocabulary];
   }
@@ -95,6 +118,15 @@ export class FakeBridge implements Bridge {
     if (this.guideError) throw this.guideError;
     return this.sessionGuides.get(sessionId) ?? null;
   }
+  async audioSettings() {
+    return this.audio;
+  }
+  async saveAudioSettings(settings: AudioSettings) {
+    if (this.saveAudioError) throw this.saveAudioError;
+    this.savedAudio.push(settings);
+    this.audio = settings;
+    return settings;
+  }
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void) {
     this.listeners.set(sessionId, onUpdate);
     return () => void this.listeners.delete(sessionId);
@@ -104,16 +136,24 @@ export class FakeBridge implements Bridge {
   }
 }
 
-export class FakeCapture implements DesktopAudioCapture {
+export class FakeCapture implements DesktopAudioCapture, MicAudioCapture {
   noAudio = false;
+  openError: Error | null = null;
   beginError: Error | null = null;
   levelValue = 0;
   opened = 0;
   stopped = 0;
+  /** The device each open asked for; null is the system's own. */
+  openedWith: Array<AudioDevice | null> = [];
+  /** Device ids that are not connected. */
+  unplugged = new Set<string>();
   onChunk: ((c: Uint8Array) => void) | null = null;
 
-  async open(): Promise<AudioCapture> {
+  async open(device: AudioDevice | null = null): Promise<AudioCapture> {
+    this.openedWith.push(device);
+    if (device && this.unplugged.has(device.deviceId)) throw new DeviceUnavailableError(device);
     if (this.noAudio) throw new NoDesktopAudioError();
+    if (this.openError) throw this.openError;
     this.opened++;
     return {
       begin: (onChunk) => {
@@ -125,6 +165,16 @@ export class FakeCapture implements DesktopAudioCapture {
         this.stopped++;
       },
     };
+  }
+}
+
+/** A fixed list of audio inputs. */
+export class FakeAudioInputs implements AudioInputs {
+  constructor(public devices: AudioDevice[] = []) {}
+  listed = 0;
+  async list() {
+    this.listed++;
+    return [...this.devices];
   }
 }
 
@@ -141,10 +191,20 @@ export class ManualDemoFeed {
 }
 
 export function renderApp(
-  opts: { bridge?: FakeBridge; capture?: FakeCapture; demo?: ManualDemoFeed } = {},
+  opts: {
+    bridge?: FakeBridge;
+    capture?: FakeCapture;
+    mic?: FakeCapture;
+    inputs?: FakeAudioInputs;
+    demo?: ManualDemoFeed;
+  } = {},
 ) {
   const bridge = opts.bridge ?? new FakeBridge();
   const capture = opts.capture ?? new FakeCapture();
-  const view = render(<App bridge={bridge} capture={capture} demoFeed={opts.demo?.feed} />);
-  return { bridge, capture, ...view };
+  const mic = opts.mic ?? new FakeCapture();
+  const inputs = opts.inputs ?? new FakeAudioInputs();
+  const view = render(
+    <App bridge={bridge} capture={capture} micCapture={mic} audioInputs={inputs} demoFeed={opts.demo?.feed} />,
+  );
+  return { bridge, capture, mic, inputs, ...view };
 }

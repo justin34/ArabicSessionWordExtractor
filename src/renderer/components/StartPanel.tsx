@@ -1,7 +1,19 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import type { AudioSettings } from '../bridge';
 import './StartPanel.css';
 
-export function StartPanel({ onStart, onCancel }: { onStart: () => void; onCancel: () => void }) {
+export function StartPanel({
+  devices,
+  onStart,
+  onCancel,
+}: {
+  /** The devices chosen in Settings; null while they load. */
+  devices: AudioSettings | null;
+  /** `mic` is whether the learner chose to also record the microphone as a Mic Track. */
+  onStart: (options: { mic: boolean }) => void;
+  onCancel: () => void;
+}) {
+  const [mic, setMic] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onCancel();
@@ -17,18 +29,31 @@ export function StartPanel({ onStart, onCancel }: { onStart: () => void; onCance
         <p className="modal__hint">
           Desktop audio (a class or video playing on this computer) will be recorded and transcribed.
         </p>
+        {devices && (
+          <p className="modal__devices">
+            Transcribing: <strong>{devices.desktopSource?.label ?? 'All system audio'}</strong>. Change
+            devices in Settings.
+          </p>
+        )}
         <div className="modal__option">
-          <input id="mic-option" type="checkbox" disabled aria-describedby="mic-soon" />
+          <input
+            id="mic-option"
+            type="checkbox"
+            checked={mic}
+            onChange={(e) => setMic(e.target.checked)}
+            aria-describedby="mic-note"
+          />
           <label htmlFor="mic-option">Also record my microphone</label>
-          <span id="mic-soon" className="modal__soon">
-            Microphone recording is coming soon.
+          <span id="mic-note" className="modal__note">
+            {devices && <>From {devices.microphone?.label ?? 'the default microphone'}. </>}
+            Saved as a separate track that plays alongside in Replay. It is never transcribed.
           </span>
         </div>
         <div className="modal__actions">
           <button type="button" className="btn" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className="btn btn--primary" onClick={onStart} autoFocus>
+          <button type="button" className="btn btn--primary" onClick={() => onStart({ mic })} autoFocus>
             Start
           </button>
         </div>

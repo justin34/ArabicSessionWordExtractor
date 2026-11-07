@@ -1,4 +1,6 @@
 import type {
+  AudioDevice,
+  AudioSettings,
   LiveUtterance,
   Session,
   SessionGuide,
@@ -8,7 +10,7 @@ import type {
   WordDetails,
 } from '../core/types';
 
-export type { LiveUtterance, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails };
+export type { AudioDevice, AudioSettings, LiveUtterance, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -17,14 +19,19 @@ export type Unsubscribe = () => void;
  * preload bridge; tests substitute a fake.
  */
 export interface Bridge {
-  startSession(): Promise<Session>;
+  /** With `mic`, the Session also records a Mic Track. */
+  startSession(options?: { mic: boolean }): Promise<Session>;
   appendDesktopAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
+  /** Writes to the Session's Mic Track; it is never transcribed. */
+  appendMicAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
   stopSession(sessionId: number): Promise<Session>;
   listSessions(): Promise<Session[]>;
   /** A Session's stored Transcript, in order. */
   transcript(sessionId: number): Promise<Utterance[]>;
   /** Where Replay loads a Session's Desktop Track from. */
   desktopTrackUrl(sessionId: number): string;
+  /** Where Replay loads a Session's Mic Track from, when it has one. */
+  micTrackUrl(sessionId: number): string;
   /** The whole Vocabulary, most recently first heard first. */
   listVocabulary(): Promise<VocabularyEntry[]>;
   /** The word panel's Detail Module sections for a Lemma; null when it is not in the Vocabulary. */
@@ -33,6 +40,9 @@ export interface Bridge {
   wordCard(lemmaId: number): Promise<WordCard | null>;
   /** A completed Session's Session Guide; null when it has none. */
   sessionGuide(sessionId: number): Promise<SessionGuide | null>;
+  /** Which audio devices Sessions record from, as stored. */
+  audioSettings(): Promise<AudioSettings>;
+  saveAudioSettings(settings: AudioSettings): Promise<AudioSettings>;
   /** Live transcript for a real Session. Nothing is connected to it yet. */
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void): Unsubscribe;
 }
@@ -44,7 +54,7 @@ export class NoDesktopAudioError extends Error {
   }
 }
 
-/** An open desktop-audio capture that is not recording yet. */
+/** An open audio capture (desktop or microphone) that is not recording yet. */
 export interface AudioCapture {
   /** Begin recording; chunks are delivered in order. */
   begin(onChunk: (chunk: Uint8Array) => void): void;
@@ -54,9 +64,31 @@ export interface AudioCapture {
   stop(): Promise<void>;
 }
 
+/** Thrown by capture when the chosen device is not connected. */
+export class DeviceUnavailableError extends Error {
+  constructor(readonly device: AudioDevice) {
+    super(`“${device.label || 'The chosen device'}” is not available. Choose another device in Settings.`);
+  }
+}
+
 export interface DesktopAudioCapture {
-  /** Throws NoDesktopAudioError when no desktop audio is available. */
-  open(): Promise<AudioCapture>;
+  /**
+   * Opens what is transcribed: all system audio when `source` is null, else that input
+   * device. Throws NoDesktopAudioError when no desktop audio is available, and
+   * DeviceUnavailableError when the device is not connected.
+   */
+  open(source?: AudioDevice | null): Promise<AudioCapture>;
+}
+
+/** Opens the microphone for a Session's Mic Track. Throws when it cannot be opened. */
+export interface MicAudioCapture {
+  /** The default microphone when `device` is null; DeviceUnavailableError when it is not connected. */
+  open(device?: AudioDevice | null): Promise<AudioCapture>;
+}
+
+/** The system's audio input devices (microphones, Stereo Mix, virtual cables). */
+export interface AudioInputs {
+  list(): Promise<AudioDevice[]>;
 }
 
 /** Starts a scripted fake transcript for a Demo Session; returns a cancel function. */

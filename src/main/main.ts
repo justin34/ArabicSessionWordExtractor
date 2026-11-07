@@ -5,6 +5,7 @@ import { createApp, type App } from '../core/app';
 import { audioFileResponse } from '../core/audioFile';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
 import { readDetailModuleConfig } from '../core/details/wordDetails';
+import { parseAudioSettings } from '../core/settings';
 import { SqliteDictionary } from '../core/dictionary/sqlite';
 import type { ArabicAnalyzer, Dictionary, SpeechToText, Translator } from '../core/providers';
 import { DeepgramSpeechToText } from '../core/stt/deepgram';
@@ -110,16 +111,21 @@ function optionalSurface(value: unknown): string | undefined {
   return typeof value === 'string' && value.length <= 200 ? value : undefined;
 }
 
-function registerIpc({ sessions, vocabulary, words, guides }: App): void {
+function registerIpc({ sessions, vocabulary, words, guides, settings }: App): void {
   // Every window hears every live Session; the renderer picks the one it shows.
   sessions.subscribe((sessionId, update) => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('transcript:update', sessionId, update);
     }
   });
-  ipcMain.handle('sessions:start', () => sessions.start());
+  ipcMain.handle('sessions:start', (_event, options: unknown) =>
+    sessions.start('webm', { mic: (options as { mic?: unknown } | undefined)?.mic === true }),
+  );
   ipcMain.handle('sessions:appendDesktopAudio', (_event, id: unknown, chunk: unknown) =>
     sessions.appendDesktopAudio(requireSessionId(id), requireChunk(chunk)),
+  );
+  ipcMain.handle('sessions:appendMicAudio', (_event, id: unknown, chunk: unknown) =>
+    sessions.appendMicAudio(requireSessionId(id), requireChunk(chunk)),
   );
   ipcMain.handle('sessions:stop', (_event, id: unknown) => sessions.stop(requireSessionId(id)));
   ipcMain.handle('sessions:list', () => sessions.list());
@@ -129,6 +135,12 @@ function registerIpc({ sessions, vocabulary, words, guides }: App): void {
     (await words.details(requireLemmaId(lemmaId), optionalSurface(surface))) ?? null,
   );
   ipcMain.handle('guides:wordCard', (_event, lemmaId: unknown) => guides.wordCard(requireLemmaId(lemmaId)) ?? null);
+  ipcMain.handle('settings:audio', () => settings.audio());
+  ipcMain.handle('settings:setAudio', (_event, value: unknown) => {
+    const audio = parseAudioSettings(value);
+    if (!audio) throw new Error('Invalid audio settings');
+    return settings.setAudio(audio);
+  });
   ipcMain.handle(
     'guides:sessionGuide',
     (_event, id: unknown) => guides.sessionGuide(requireSessionId(id)) ?? null,
@@ -136,8 +148,9 @@ function registerIpc({ sessions, vocabulary, words, guides }: App): void {
 }
 
 /**
- * Replay reads Session audio from `session-audio://desktop/<id>`: only Desktop Tracks of
- * stored Sessions, never an arbitrary path. Ranges are honoured so the player can seek.
+ * Replay reads Session audio from `session-audio://desktop/<id>` and `session-audio://mic/<id>`:
+ * only the Desktop and Mic Tracks of stored Sessions, never an arbitrary path. Ranges are
+ * honoured so the player can seek.
  */
 const AUDIO_SCHEME = 'session-audio';
 protocol.registerSchemesAsPrivileged([
@@ -148,8 +161,14 @@ function serveSessionAudio({ sessions }: App): void {
   protocol.handle(AUDIO_SCHEME, (request) => {
     const url = new URL(request.url);
     const id = Number(url.pathname.replace(/^\//, ''));
-    const path =
-      url.hostname === 'desktop' && Number.isInteger(id) && id > 0 ? sessions.desktopTrackPath(id) : undefined;
+    const valid = Number.isInteger(id) && id > 0;
+    const path = !valid
+      ? undefined
+      : url.hostname === 'desktop'
+        ? sessions.desktopTrackPath(id)
+        : url.hostname === 'mic'
+          ? sessions.micTrackPath(id)
+          : undefined;
     if (!path) return new Response('No such track', { status: 404 });
     return audioFileResponse(path, request.headers.get('range'));
   });

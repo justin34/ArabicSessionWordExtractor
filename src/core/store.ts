@@ -18,6 +18,7 @@ interface SessionRow {
   ended_at: string | null;
   status: SessionStatus;
   desktop_track_path: string;
+  mic_track_path: string | null;
 }
 
 interface UtteranceRow {
@@ -35,6 +36,7 @@ const toSession = (r: SessionRow): Session => ({
   endedAt: r.ended_at,
   status: r.status,
   desktopTrackPath: r.desktop_track_path,
+  micTrackPath: r.mic_track_path ?? null,
 });
 
 interface TokenRow {
@@ -215,6 +217,8 @@ export class Store {
     this.addColumnIfMissing('lemmas', 'pattern', 'TEXT');
     this.addColumnIfMissing('surface_forms', 'diacritized', 'TEXT');
     this.addColumnIfMissing('surface_forms', 'pronunciation', 'TEXT');
+    // ... and before the Mic Track.
+    this.addColumnIfMissing('sessions', 'mic_track_path', 'TEXT');
   }
 
   private addColumnIfMissing(table: string, column: string, type: string): void {
@@ -222,8 +226,15 @@ export class Store {
     if (!columns.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 
-  /** Creates a recording Session; desktopTrackPathFor derives its Desktop Track path from the new id. */
-  createSession(startedAt: string, desktopTrackPathFor: (id: number) => string): Session {
+  /**
+   * Creates a recording Session; desktopTrackPathFor derives its Desktop Track path from the
+   * new id, and micTrackPathFor, when given, its Mic Track path.
+   */
+  createSession(
+    startedAt: string,
+    desktopTrackPathFor: (id: number) => string,
+    micTrackPathFor?: (id: number) => string,
+  ): Session {
     this.db.exec('BEGIN');
     try {
       const id = Number(
@@ -234,8 +245,8 @@ export class Store {
           .run(startedAt).lastInsertRowid,
       );
       this.db
-        .prepare('UPDATE sessions SET desktop_track_path = ? WHERE id = ?')
-        .run(desktopTrackPathFor(id), id);
+        .prepare('UPDATE sessions SET desktop_track_path = ?, mic_track_path = ? WHERE id = ?')
+        .run(desktopTrackPathFor(id), micTrackPathFor?.(id) ?? null, id);
       this.db.exec('COMMIT');
       return this.getSession(id);
     } catch (err) {

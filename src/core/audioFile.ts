@@ -32,7 +32,7 @@ function parseRange(header: string | null, size: number): { start: number; end: 
 
 /**
  * Serves a recorded audio file, honouring byte ranges so the player can seek. Replay
- * reads each Session's Desktop Track through this.
+ * reads each Session's Desktop Track and Mic Track through this.
  */
 export function audioFileResponse(path: string, rangeHeader: string | null): Response {
   let size: number;
