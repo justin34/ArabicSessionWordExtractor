@@ -53,7 +53,7 @@ describe('Session List', () => {
     expect(within(row).getByText('0:08')).toBeTruthy();
   });
 
-  it('opens a completed Session on a Replay placeholder, with a way back', async () => {
+  it('opens a completed Session on its Session Guide, noting Replay is to come, with a way back', async () => {
     const user = userEvent.setup();
     renderApp({ bridge: new FakeBridge([session({ id: 1 })]) });
 

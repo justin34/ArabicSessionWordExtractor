@@ -9,8 +9,17 @@ import {
   FakeSpeechToText,
   FakeTranslator,
 } from '../src/core/fakes';
-import type { ArabicAnalyzer, Dictionary, Providers, SttEvent, Translator } from '../src/core/providers';
-import type { LiveUtterance } from '../src/core/types';
+import { DatabaseSync } from 'node:sqlite';
+import type { DetailModule } from '../src/core/details/modules';
+import type {
+  ArabicAnalyzer,
+  Dictionary,
+  Providers,
+  SttEvent,
+  TokenAnalysis,
+  Translator,
+} from '../src/core/providers';
+import type { LiveUtterance, SessionGuide } from '../src/core/types';
 
 const script: SttEvent[] = [
   { type: 'interim', text: 'مر', startMs: 0, endMs: 300 },
@@ -504,6 +513,194 @@ describe('Quick gloss', () => {
       ['write', true],
       ['student', true],
     ]);
+  });
+});
+
+describe('Word Cards and Session Guides', () => {
+  /** A final Utterance whose words are timed one after another. */
+  function final(text: string, startMs: number): SttEvent {
+    const words = text.split(' ').map((w, i) => ({ text: w, startMs: startMs + i * 500, endMs: startMs + i * 500 + 400 }));
+    return { type: 'final', text, startMs, endMs: words.at(-1)!.endMs, words };
+  }
+  const readings: Record<string, TokenAnalysis> = {
+    كتب: { surface: 'كتب', lemma: 'كَتَب', partOfSpeech: 'verb', stemGloss: 'write;inscribe' },
+    كتبوا: { surface: 'كتبوا', lemma: 'كَتَب', partOfSpeech: 'verb', stemGloss: 'write;inscribe' },
+    الطالب: { surface: 'الطالب', lemma: 'طالِب', partOfSpeech: 'noun', stemGloss: 'student' },
+    الدرس: { surface: 'الدرس', lemma: 'دَرْس', partOfSpeech: 'noun', stemGloss: 'lesson' },
+    في: { surface: 'في', lemma: 'فِي', partOfSpeech: 'prep', stemGloss: 'in' },
+    البيت: { surface: 'البيت', lemma: 'بَيْت', partOfSpeech: 'noun', stemGloss: 'house' },
+    سريعا: { surface: 'سريعا', lemma: 'سَرِيع', partOfSpeech: 'adj', stemGloss: 'fast' },
+  };
+  const analyzer: ArabicAnalyzer = {
+    analyze: async (sentence) =>
+      sentence
+        .split(' ')
+        .map((w) => w.replace(/[\p{P}\p{S}]/gu, ''))
+        .map((w) => readings[w] ?? { surface: w, lemma: w }),
+  };
+  const dictionary = new FakeDictionary({ 'كَتَب': ['to write', 'to compose'] });
+  const classOne = [final('كتب الطالب الدرس.', 0), final('الطالب في البيت', 2000)];
+  const classTwo = [final('كتبوا الدرس سريعا', 0)];
+
+  /** Records a Session on the open app and waits for its study guides to be done. */
+  const record = async () => {
+    const s = await app!.sessions.processRecording(recordedFile([1]));
+    await app!.guides.idle();
+    return s;
+  };
+  const openWith = (script: SttEvent[]) =>
+    open(fakeProviders({ speechToText: new FakeSpeechToText(script), arabicAnalyzer: analyzer, dictionary }));
+  const words = (guide: SessionGuide | undefined) =>
+    guide?.groups.map((g) => [g.title, g.words.map((w) => [w.lemma, w.gloss, w.count])]);
+
+  it('gives every Lemma in the Vocabulary a Word Card built from the Detail Modules', async () => {
+    const core = openWith(classOne);
+
+    await record();
+
+    const entries = core.vocabulary.list();
+    expect(entries).toHaveLength(5);
+    for (const e of entries) {
+      expect(core.guides.wordCard(e.lemmaId)).toMatchObject({ lemmaId: e.lemmaId, lemma: e.lemma });
+    }
+    const katab = core.guides.wordCard(entries.find((e) => e.lemma === 'كَتَب')!.lemmaId)!;
+    expect(katab.sections.map((s) => s.moduleId)).toEqual(['form', 'definitions', 'own-examples', 'sessions']);
+    expect(katab.sections[1].blocks).toEqual([
+      { kind: 'list', ordered: true, items: [{ text: 'to write' }, { text: 'to compose' }] },
+    ]);
+  });
+
+  it('builds a Word Card as soon as its Lemma enters the Vocabulary, before the Session ends', async () => {
+    // A translation that never arrives holds the Session open.
+    let release!: (t: string) => void;
+    const slow: Translator = { translate: () => new Promise((resolve) => (release = resolve)) };
+    const core = open(
+      fakeProviders({ speechToText: new FakeSpeechToText(classTwo), arabicAnalyzer: analyzer, dictionary, translator: slow }),
+    );
+    const s = core.sessions.start();
+    let stopped = false;
+    const stopping = core.sessions.stop(s.id).then(() => (stopped = true));
+
+    await vi.waitFor(() => {
+      const entries = core.vocabulary.list();
+      expect(entries).toHaveLength(3);
+      for (const e of entries) expect(core.guides.wordCard(e.lemmaId)).toBeDefined();
+    });
+    expect(stopped).toBe(false);
+    expect(core.guides.sessionGuide(s.id)).toBeUndefined();
+
+    release('They wrote the lesson quickly');
+    await stopping;
+    expect(core.guides.sessionGuide(s.id)).toBeDefined();
+  });
+
+  it('generates a Session Guide when the Session ends: new Lemmas grouped, each linking to its Word Card', async () => {
+    const core = openWith(classOne);
+
+    const s = await record();
+
+    const guide = core.guides.sessionGuide(s.id);
+    expect(guide).toMatchObject({ sessionId: s.id, lemmasHeard: 5 });
+    expect(words(guide)).toEqual([
+      ['Nouns', [['طالِب', 'student', 2], ['دَرْس', 'lesson', 1], ['بَيْت', 'house', 1]]],
+      ['Verbs', [['كَتَب', 'to write', 1]]],
+      ['Other words', [['فِي', 'in', 1]]],
+    ]);
+    for (const w of guide!.groups.flatMap((g) => g.words)) {
+      expect(core.guides.wordCard(w.lemmaId)?.lemma).toBe(w.lemma);
+    }
+  });
+
+  it("lists only the Lemmas first heard in that Session, and rebuilds earlier Lemmas' Word Cards", async () => {
+    openWith(classOne);
+    const first = await record();
+    const katabId = app!.vocabulary.list().find((e) => e.lemma === 'كَتَب')!.lemmaId;
+    const before = app!.guides.wordCard(katabId)!;
+    app?.close();
+
+    const core = openWith(classTwo);
+    const second = await record();
+
+    const guide = core.guides.sessionGuide(second.id);
+    expect(guide?.lemmasHeard).toBe(3);
+    expect(words(guide)).toEqual([['Adjectives', [['سَرِيع', 'fast', 1]]]]);
+    // The first Session's guide is as it was generated.
+    expect(core.guides.sessionGuide(first.id)?.groups.flatMap((g) => g.words)).toHaveLength(5);
+    const after = core.guides.wordCard(katabId)!;
+    expect(after.generatedAt).toBe(before.generatedAt);
+    expect(after.updatedAt >= before.updatedAt).toBe(true);
+    const heardIn = after.sections.find((s) => s.moduleId === 'sessions')!.blocks[0];
+    expect(heardIn).toMatchObject({ kind: 'list', items: [{}, {}] });
+  });
+
+  it('keeps Word Cards and Session Guides across a restart', async () => {
+    openWith(classOne);
+    const s = await record();
+    const ids = app!.vocabulary.list().map((e) => e.lemmaId);
+    app?.close();
+
+    const core = open();
+    await core.guides.idle();
+    expect(words(core.guides.sessionGuide(s.id))).toHaveLength(3);
+    for (const id of ids) expect(core.guides.wordCard(id)).toBeDefined();
+  });
+
+  it('a Session with no words heard gets an empty Session Guide', async () => {
+    const core = open(fakeProviders({ speechToText: new FakeSpeechToText([]) }));
+
+    const s = await record();
+
+    expect(core.guides.sessionGuide(s.id)).toMatchObject({ sessionId: s.id, lemmasHeard: 0, groups: [] });
+  });
+
+  it('a Session ended by a crash gets its Session Guide when the app reopens', async () => {
+    const crashed = openWith(classOne).sessions.start();
+    app?.close(); // no stop: simulates the app dying mid-recording
+
+    const reopened = open();
+    await reopened.guides.idle();
+
+    expect(reopened.guides.sessionGuide(crashed.id)).toMatchObject({ sessionId: crashed.id, groups: [] });
+  });
+
+  it('gives Lemmas heard before Word Cards existed their Word Card when the app opens', async () => {
+    openWith(classOne);
+    await record();
+    app?.close();
+    const db = new DatabaseSync(join(dir, 'app.db'));
+    db.exec('DELETE FROM word_cards; DELETE FROM session_guides');
+    db.close();
+
+    const core = open(fakeProviders({ dictionary }));
+    await core.guides.idle();
+
+    const entries = core.vocabulary.list();
+    expect(entries.every((e) => core.guides.wordCard(e.lemmaId)?.sections.length)).toBe(true);
+    expect(core.sessions.list().every((s) => core.guides.sessionGuide(s.id))).toBe(true);
+  });
+
+  it('a Word Card that cannot be built is skipped; the Session still ends with its Session Guide', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const breaks: DetailModule = {
+      id: 'breaks',
+      title: 'Breaks',
+      build: () => {
+        throw new Error('module bug');
+      },
+    };
+    app = createApp({
+      dataDir: dir,
+      providers: fakeProviders({ speechToText: new FakeSpeechToText(classOne), arabicAnalyzer: analyzer, dictionary }),
+      detailModules: ['form', breaks],
+    });
+
+    const s = await record();
+
+    expect(s.status).toBe('completed');
+    expect(app.guides.sessionGuide(s.id)?.groups).toHaveLength(3);
+    const card = app.guides.wordCard(app.vocabulary.list()[0].lemmaId);
+    expect(card?.sections.map((x) => x.moduleId)).toEqual(['form']);
+    errors.mockRestore();
   });
 });
 

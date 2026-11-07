@@ -8,7 +8,7 @@ import {
   type DesktopAudioCapture,
   type LiveUtterance,
 } from '../../src/renderer/bridge';
-import type { Session, VocabularyEntry, WordDetails } from '../../src/core/types';
+import type { Session, SessionGuide, VocabularyEntry, WordCard, WordDetails } from '../../src/core/types';
 
 export function session(over: Partial<Session> & { id: number }): Session {
   return {
@@ -31,6 +31,10 @@ export class FakeBridge implements Bridge {
   details = new Map<number, WordDetails>();
   detailsError: Error | null = null;
   detailRequests: Array<{ lemmaId: number; surface?: string }> = [];
+  /** Word Cards by Lemma id, Session Guides by Session id. */
+  wordCards = new Map<number, WordCard>();
+  sessionGuides = new Map<number, SessionGuide>();
+  guideError: Error | null = null;
   private listeners = new Map<number, (u: LiveUtterance) => void>();
   private nextId: number;
 
@@ -70,6 +74,15 @@ export class FakeBridge implements Bridge {
     this.detailRequests.push({ lemmaId, surface });
     if (this.detailsError) throw this.detailsError;
     return this.details.get(lemmaId) ?? null;
+  }
+  async wordCard(lemmaId: number) {
+    this.calls.push(`wordCard:${lemmaId}`);
+    return this.wordCards.get(lemmaId) ?? null;
+  }
+  async sessionGuide(sessionId: number) {
+    this.calls.push(`sessionGuide:${sessionId}`);
+    if (this.guideError) throw this.guideError;
+    return this.sessionGuides.get(sessionId) ?? null;
   }
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void) {
     this.listeners.set(sessionId, onUpdate);

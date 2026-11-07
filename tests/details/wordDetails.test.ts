@@ -95,6 +95,8 @@ async function recorded(
       providers: providers({ speechToText: new FakeSpeechToText(events), ...options.providers }),
     });
     await app.sessions.processRecording(audio);
+    // Word Cards rebuilt at the Session's end run the same modules.
+    await app.guides.idle();
   }
   const current = app!;
   return {
@@ -275,6 +277,8 @@ describe('A failing Detail Module', () => {
   it('is left out while the other modules still show', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { app, entry } = await recorded({ detailModules: ['form', throwing, 'definitions', rejecting, 'sessions'] });
+    // Word Cards built while recording ran the same modules.
+    errors.mockClear();
 
     const details = await app.words.details(entry('كَتَب').lemmaId, 'كتبوا');
 
@@ -297,8 +301,11 @@ describe('A failing Detail Module', () => {
 
   it('is left out when it does not answer', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const hanging: DetailModule = { id: 'hangs', title: 'Hangs', build: () => new Promise(() => {}) };
+    // Answers while the Word Cards are built during recording, then stops answering.
+    let hang = false;
+    const hanging: DetailModule = { id: 'hangs', title: 'Hangs', build: () => (hang ? new Promise(() => {}) : null) };
     const { app, entry } = await recorded({ detailModules: [hanging, 'form'] });
+    hang = true;
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 
     const pending = app.words.details(entry('كَتَب').lemmaId);

@@ -1,6 +1,16 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { TokenAnalysis } from './providers';
-import type { HeardIn, Session, SessionStatus, Token, Utterance, VocabularyEntry } from './types';
+import type {
+  DetailSection,
+  HeardIn,
+  Session,
+  SessionGuide,
+  SessionStatus,
+  Token,
+  Utterance,
+  VocabularyEntry,
+  WordCard,
+} from './types';
 
 interface SessionRow {
   id: number;
@@ -92,6 +102,18 @@ export interface HeardSession {
   count: number;
 }
 
+/** A Lemma first heard in a given Session, for its Session Guide. */
+export interface NewLemma {
+  lemmaId: number;
+  lemma: string;
+  partOfSpeech: string | null;
+  stemGloss: string | null;
+  /** The first quick gloss one of its Tokens got in the Session, if any. */
+  gloss: string | null;
+  /** Times heard in the Session. */
+  count: number;
+}
+
 /** One analyzed word of a final Utterance, for the Vocabulary. */
 export interface HeardWord {
   /** The surface form heard, without punctuation. */
@@ -166,6 +188,19 @@ export class Store {
         surface TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS occurrences_by_lemma ON occurrences (lemma_id, utterance_id);
+      -- Study guides, stored as generated: a Word Card per Lemma, a Session Guide per Session.
+      CREATE TABLE IF NOT EXISTS word_cards (
+        lemma_id INTEGER PRIMARY KEY REFERENCES lemmas(id),
+        generated_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sections TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS session_guides (
+        session_id INTEGER PRIMARY KEY REFERENCES sessions(id),
+        generated_at TEXT NOT NULL,
+        lemmas_heard INTEGER NOT NULL,
+        groups TEXT NOT NULL
+      );
     `);
     // Databases made before the Vocabulary have Tokens without a Lemma column.
     const tokenColumns = this.db.prepare('PRAGMA table_info(tokens)').all() as Array<{ name: string }>;
@@ -426,6 +461,127 @@ export class Store {
       )
       .all(lemmaId)
       .map((r) => ({ ...r })) as unknown as HeardSession[];
+  }
+
+  /**
+   * Stores a Lemma's Word Card. A new card is created; an existing one is rebuilt only
+   * when `replace` is set, keeping when it was first generated.
+   */
+  putWordCard(lemmaId: number, sections: DetailSection[], at: string, replace: boolean): void {
+    const json = JSON.stringify(sections);
+    if (replace) {
+      this.db
+        .prepare(
+          `INSERT INTO word_cards (lemma_id, generated_at, updated_at, sections) VALUES (?, ?, ?, ?)
+           ON CONFLICT (lemma_id) DO UPDATE SET updated_at = excluded.updated_at, sections = excluded.sections`,
+        )
+        .run(lemmaId, at, at, json);
+    } else {
+      this.db
+        .prepare(
+          'INSERT OR IGNORE INTO word_cards (lemma_id, generated_at, updated_at, sections) VALUES (?, ?, ?, ?)',
+        )
+        .run(lemmaId, at, at, json);
+    }
+  }
+
+  getWordCard(lemmaId: number): WordCard | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT c.lemma_id, l.lemma, c.generated_at, c.updated_at, c.sections
+         FROM word_cards c JOIN lemmas l ON l.id = c.lemma_id WHERE c.lemma_id = ?`,
+      )
+      .get(lemmaId) as
+      | { lemma_id: number; lemma: string; generated_at: string; updated_at: string; sections: string }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      lemmaId: row.lemma_id,
+      lemma: row.lemma,
+      generatedAt: row.generated_at,
+      updatedAt: row.updated_at,
+      sections: JSON.parse(row.sections) as DetailSection[],
+    };
+  }
+
+  /** Lemmas of the Vocabulary that have no Word Card yet, e.g. heard before Word Cards existed. */
+  lemmasWithoutWordCard(): number[] {
+    return (
+      this.db
+        .prepare('SELECT id FROM lemmas WHERE id NOT IN (SELECT lemma_id FROM word_cards) ORDER BY id')
+        .all() as Array<{ id: number }>
+    ).map((r) => r.id);
+  }
+
+  /** Every Lemma heard in a Session. */
+  sessionLemmaIds(sessionId: number): number[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT DISTINCT o.lemma_id AS id FROM occurrences o JOIN utterances u ON u.id = o.utterance_id
+           WHERE u.session_id = ? ORDER BY o.lemma_id`,
+        )
+        .all(sessionId) as Array<{ id: number }>
+    ).map((r) => r.id);
+  }
+
+  /**
+   * The Lemmas first heard in a Session (heard in no earlier Session), in the order heard
+   * there, with their times heard in it and the first quick gloss a Token of theirs got.
+   */
+  newLemmasInSession(sessionId: number): NewLemma[] {
+    return this.db
+      .prepare(
+        `SELECT l.id AS lemmaId, l.lemma, l.part_of_speech AS partOfSpeech, l.stem_gloss AS stemGloss,
+                count(*) AS count,
+                (SELECT t.gloss FROM tokens t JOIN utterances tu ON tu.id = t.utterance_id
+                 WHERE t.lemma_id = l.id AND tu.session_id = ?1 AND t.gloss <> ''
+                 ORDER BY tu.start_ms, tu.id, t.position LIMIT 1) AS gloss,
+                min(printf('%012d %012d %06d', u.start_ms, u.id, o.position)) AS heardOrder
+         FROM occurrences o JOIN utterances u ON u.id = o.utterance_id JOIN lemmas l ON l.id = o.lemma_id
+         WHERE u.session_id = ?1
+           AND NOT EXISTS (
+             SELECT 1 FROM occurrences po JOIN utterances pu ON pu.id = po.utterance_id
+             WHERE po.lemma_id = l.id AND pu.session_id < ?1)
+         GROUP BY l.id ORDER BY heardOrder, l.id`,
+      )
+      .all(sessionId)
+      .map(({ heardOrder: _, ...r }) => ({ ...r })) as unknown as NewLemma[];
+  }
+
+  putSessionGuide(guide: SessionGuide): void {
+    this.db
+      .prepare(
+        `INSERT INTO session_guides (session_id, generated_at, lemmas_heard, groups) VALUES (?, ?, ?, ?)
+         ON CONFLICT (session_id) DO UPDATE SET
+           generated_at = excluded.generated_at, lemmas_heard = excluded.lemmas_heard, groups = excluded.groups`,
+      )
+      .run(guide.sessionId, guide.generatedAt, guide.lemmasHeard, JSON.stringify(guide.groups));
+  }
+
+  getSessionGuide(sessionId: number): SessionGuide | undefined {
+    const row = this.db.prepare('SELECT * FROM session_guides WHERE session_id = ?').get(sessionId) as
+      | { session_id: number; generated_at: string; lemmas_heard: number; groups: string }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      sessionId: row.session_id,
+      generatedAt: row.generated_at,
+      lemmasHeard: row.lemmas_heard,
+      groups: JSON.parse(row.groups) as SessionGuide['groups'],
+    };
+  }
+
+  /** Completed Sessions with no Session Guide, e.g. ended by a crash, oldest first. */
+  completedSessionsWithoutGuide(): number[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT id FROM sessions WHERE status = 'completed'
+           AND id NOT IN (SELECT session_id FROM session_guides) ORDER BY id`,
+        )
+        .all() as Array<{ id: number }>
+    ).map((r) => r.id);
   }
 
   getTranscript(sessionId: number): Utterance[] {
