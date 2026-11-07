@@ -8,6 +8,17 @@ export interface Session {
   desktopTrackPath: string;
 }
 
+/** One word occurrence in an Utterance. */
+export interface Token {
+  surface: string;
+  startMs: number;
+  endMs: number;
+  /** English gloss shown under the word. */
+  gloss: string;
+  /** Id of the Lemma this Token resolves to, once lemmatization exists. */
+  lemmaId: number | null;
+}
+
 export interface Utterance {
   id: number;
   sessionId: number;
@@ -15,4 +26,6 @@ export interface Utterance {
   translation: string;
   startMs: number;
   endMs: number;
+  /** Empty while the Utterance is interim, and until the real pipeline produces Tokens. */
+  tokens: Token[];
 }

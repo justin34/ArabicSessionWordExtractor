@@ -1,0 +1,59 @@
+.screen__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-block-end: var(--space-5);
+}
+.screen__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  text-align: start;
+  cursor: pointer;
+}
+.session-row:hover {
+  background: var(--color-surface-muted);
+}
+.session-row__start {
+  flex: 1;
+}
+.session-row__duration {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+.badge {
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  background: var(--color-surface-muted);
+}
+.badge--recording {
+  background: var(--color-danger-bg);
+  color: var(--color-recording);
+}
+.badge--completed {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+.badge--demo {
+  background: var(--color-demo-bg);
+  color: var(--color-demo);
+}

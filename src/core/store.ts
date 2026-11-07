@@ -36,6 +36,7 @@ function toUtterance(r: UtteranceRow): Utterance {
     translation: r.translation,
     startMs: r.start_ms,
     endMs: r.end_ms,
+    tokens: [], // Tokens are not persisted yet
   };
 }
 
@@ -97,7 +98,7 @@ export class Store {
     return rows.map(toSession);
   }
 
-  addUtterance(u: Omit<Utterance, 'id'>): void {
+  addUtterance(u: Omit<Utterance, 'id' | 'tokens'>): void {
     this.db
       .prepare(
         'INSERT INTO utterances (session_id, text, translation, start_ms, end_ms) VALUES (?, ?, ?, ?, ?)',

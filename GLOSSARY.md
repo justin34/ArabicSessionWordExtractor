@@ -14,6 +14,7 @@ A desktop app that listens to spoken Arabic (class, videos), shows a live visual
 - **Word Card** — per-Lemma study guide, auto-generated from Detail Modules.
 - **Session Guide** — per-Session study guide: new Lemmas, grouped, linking to their Word Cards.
 - **Detail Module** — a pluggable unit that contributes one section of word info (e.g. definition, root, conjugations, example sentences from the learner's own Sessions). Modules can be added/removed/reordered without touching the rest of the app. Used by the click-a-word panel and Word Cards.
+- **Session List** — the home screen: past Sessions, and the entry point to start a new one. Opening a completed Session shows its Replay View; opening a recording Session shows its Live View.
 - **Live View** — the recording screen: Arabic (RTL) with English gloss under each word, plus a sentence translation line.
 - **Replay View** — plays a Session's audio while highlighting the current Token/Utterance, same visuals as Live View.
 

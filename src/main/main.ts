@@ -55,15 +55,18 @@ function registerIpc(): void {
 
 function createWindow(): void {
   const win = new BrowserWindow({
-    width: 900,
-    height: 650,
+    width: 1100,
+    height: 760,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-  void win.loadFile(join(__dirname, '..', 'renderer', 'index.html'));
+  // In dev (npm run dev) the renderer is served by Vite for hot reload.
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devUrl) void win.loadURL(devUrl);
+  else void win.loadFile(join(__dirname, '..', 'renderer', 'index.html'));
 }
 
 app.whenReady().then(() => {
