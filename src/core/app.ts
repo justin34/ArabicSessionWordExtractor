@@ -1,12 +1,11 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Providers } from './providers';
-import { SessionService } from './sessions';
+import { Sessions } from './sessions';
 import { Store } from './store';
 
 export interface App {
-  sessions: SessionService;
-  providers: Providers;
+  sessions: Sessions;
   close(): void;
 }
 
@@ -15,13 +14,10 @@ export interface AppOptions {
   providers: Providers;
 }
 
-export function createApp(options: AppOptions): App {
-  mkdirSync(options.dataDir, { recursive: true });
-  const store = new Store(join(options.dataDir, 'app.db'));
-  const sessions = new SessionService(
-    store,
-    options.providers,
-    join(options.dataDir, 'recordings'),
-  );
-  return { sessions, providers: options.providers, close: () => store.close() };
+/** Wires local storage and the providers into the Session pipeline. */
+export function createApp({ dataDir, providers }: AppOptions): App {
+  mkdirSync(dataDir, { recursive: true });
+  const store = new Store(join(dataDir, 'app.db'));
+  const sessions = new Sessions(store, providers, join(dataDir, 'recordings'));
+  return { sessions, close: () => store.close() };
 }

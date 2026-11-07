@@ -7,7 +7,7 @@ export interface SttEvent {
   endMs: number;
 }
 
-/** Streaming speech-to-text. Audio in, interim and final text with timings out. */
+/** Streaming speech-to-text: audio in, interim and final text with timings out. */
 export interface SpeechToText {
   transcribe(audio: AsyncIterable<Uint8Array>): AsyncIterable<SttEvent>;
 }
@@ -17,6 +17,7 @@ export interface Translator {
   translate(arabic: string): Promise<string>;
 }
 
+/** One analysis per Token of a final sentence. */
 export interface TokenAnalysis {
   surface: string;
   lemma: string;
@@ -36,7 +37,7 @@ export interface DictionaryEntry {
   definitions: string[];
 }
 
-/** Dictionary: dictionary form in, definitions out. */
+/** Dictionary: dictionary form (Lemma) in, definitions out. */
 export interface Dictionary {
   lookup(lemma: string): Promise<DictionaryEntry | undefined>;
 }
