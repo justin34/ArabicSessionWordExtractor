@@ -81,6 +81,36 @@ describe('Live View transcript', () => {
   });
 });
 
+describe('Live View translation warning', () => {
+  const failed = (id: string, error: string): LiveUtterance => ({
+    ...final(id, [['مرحبا', '']], ''),
+    translationError: error,
+  });
+
+  it('warns, with the reason, when a sentence could not be translated, keeping its Arabic', async () => {
+    const { demo } = await enterDemoLiveView();
+    expect(screen.queryByRole('status')).toBeNull();
+
+    act(() => demo.emit(final('u1', [['مرحبا', '']], '')));
+    act(() => demo.emit(failed('u1', 'Google Translation error 403: blocked')));
+
+    const warning = screen.getByRole('status');
+    expect(warning.textContent).toMatch(/translation isn’t working/i);
+    expect(warning.textContent).toContain('Google Translation error 403: blocked');
+    expect(within(screen.getByRole('article')).getByText('مرحبا')).toBeTruthy();
+  });
+
+  it('clears the warning once a later sentence is translated', async () => {
+    const { demo } = await enterDemoLiveView();
+    act(() => demo.emit(failed('u1', 'timeout')));
+    expect(screen.getByRole('status')).toBeTruthy();
+
+    act(() => demo.emit(final('u2', [['شكرا', 'thanks']], 'Thank you.')));
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByText('Thank you.')).toBeTruthy();
+  });
+});
+
 describe('Live View auto-scroll', () => {
   // jsdom does no layout, so give scrollable elements a controllable one.
   beforeAll(() => {

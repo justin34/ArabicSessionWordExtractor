@@ -29,6 +29,21 @@ function LevelMeter({ getLevel }: { getLevel: () => number }) {
 
 const BOTTOM_TOLERANCE_PX = 24;
 
+/** The failure from the latest translation attempt, if it failed; a later success clears it. */
+function latestTranslationError(utterances: LiveUtterance[]): string | undefined {
+  const latest = utterances.findLast((u) => u.isFinal && (u.translation || u.translationError));
+  return latest?.translationError;
+}
+
+function TranslationWarning({ error }: { error: string }) {
+  return (
+    <div className="live__warning" role="status">
+      <strong>Sentence translation isn’t working.</strong> New sentences show in Arabic only.
+      <span className="live__warning-detail">{error}</span>
+    </div>
+  );
+}
+
 export function LiveView({
   session,
   now,
@@ -60,6 +75,8 @@ export function LiveView({
     setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_TOLERANCE_PX);
   }
 
+  const translationError = latestTranslationError(utterances);
+
   return (
     <div className="live">
       <button type="button" className="btn btn--link" onClick={onBack}>
@@ -74,6 +91,7 @@ export function LiveView({
           Stop
         </button>
       </header>
+      {translationError && <TranslationWarning error={translationError} />}
       <div className="live__bodywrap">
         <div className="live__body" role="log" aria-label="Transcript" ref={logRef} onScroll={onScroll}>
           {utterances.length === 0 && (

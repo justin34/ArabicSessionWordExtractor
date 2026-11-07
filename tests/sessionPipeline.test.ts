@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +9,7 @@ import {
   FakeSpeechToText,
   FakeTranslator,
 } from '../src/core/fakes';
-import type { Providers, SttEvent } from '../src/core/providers';
+import type { Providers, SttEvent, Translator } from '../src/core/providers';
 import type { LiveUtterance } from '../src/core/types';
 
 const script: SttEvent[] = [
@@ -172,19 +172,20 @@ describe('Word timings', () => {
     ]);
   });
 
-  it('sends the final update with its timed Tokens, and the interim one without', async () => {
+  it('sends the final updates with their timed Tokens, and the interim one without', async () => {
     const sessions = open(fakeProviders({ speechToText: new FakeSpeechToText(timed) })).sessions;
     const updates: LiveUtterance[] = [];
     sessions.subscribe((_id, u) => updates.push(u));
 
     await sessions.processRecording(recordedFile([1]));
 
-    expect(updates.map((u) => u.tokens)).toEqual([[], tokens]);
+    // The final Utterance, then the same again with its translation.
+    expect(updates.map((u) => u.tokens)).toEqual([[], tokens, tokens]);
   });
 });
 
 describe('Live transcript updates', () => {
-  it('streams interim text that becomes final under the same id, translated', async () => {
+  it('streams interim text that becomes final under the same id, then its translation', async () => {
     const sessions = open().sessions;
     const updates: Array<{ sessionId: number; update: LiveUtterance }> = [];
     sessions.subscribe((sessionId, update) => updates.push({ sessionId, update }));
@@ -193,15 +194,20 @@ describe('Live transcript updates', () => {
     sessions.appendDesktopAudio(s.id, new Uint8Array([1]));
     await sessions.stop(s.id);
 
-    expect(updates.map((u) => u.sessionId)).toEqual([s.id, s.id, s.id, s.id]);
-    const [a, b, c, d] = updates.map((u) => u.update);
-    expect(a).toMatchObject({ isFinal: false, text: 'مر', translation: '' });
-    expect(b).toMatchObject({ isFinal: true, text: 'مرحبا بكم', translation: 'Welcome' });
-    expect(c).toMatchObject({ isFinal: false, text: 'كيف' });
-    expect(d).toMatchObject({ isFinal: true, text: 'كيف حالكم', translation: 'How are you all' });
-    expect(b.id).toBe(a.id);
-    expect(d.id).toBe(c.id);
-    expect(c.id).not.toBe(a.id);
+    expect(new Set(updates.map((u) => u.sessionId))).toEqual(new Set([s.id]));
+    const ids = [...new Set(updates.map((u) => u.update.id))];
+    expect(ids).toHaveLength(2);
+    const [first, second] = ids.map((id) => updates.map((u) => u.update).filter((u) => u.id === id));
+    expect(first).toEqual([
+      expect.objectContaining({ isFinal: false, text: 'مر', translation: '' }),
+      expect.objectContaining({ isFinal: true, text: 'مرحبا بكم', translation: '' }),
+      expect.objectContaining({ isFinal: true, text: 'مرحبا بكم', translation: 'Welcome' }),
+    ]);
+    expect(second).toEqual([
+      expect.objectContaining({ isFinal: false, text: 'كيف' }),
+      expect.objectContaining({ isFinal: true, text: 'كيف حالكم', translation: '' }),
+      expect.objectContaining({ isFinal: true, text: 'كيف حالكم', translation: 'How are you all' }),
+    ]);
   });
 
   it('stops sending updates once unsubscribed', async () => {
@@ -213,6 +219,80 @@ describe('Live transcript updates', () => {
     await sessions.stop(sessions.start().id);
 
     expect(updates).toEqual([]);
+  });
+});
+
+describe('Sentence translation', () => {
+  /** Fails on the first sentence only, like a dropped request. */
+  const failingOnce = (): Translator => {
+    let calls = 0;
+    const fallback = new FakeTranslator({ 'كيف حالكم': 'How are you all' });
+    return {
+      async translate(arabic) {
+        if (calls++ === 0) throw new Error('translation service down');
+        return fallback.translate(arabic);
+      },
+    };
+  };
+
+  it('stores each final Utterance with its translation, kept across a restart', async () => {
+    const s = await open().sessions.processRecording(recordedFile([1]));
+    app?.close();
+
+    expect(open().sessions.transcript(s.id).map((u) => u.translation)).toEqual([
+      'Welcome',
+      'How are you all',
+    ]);
+  });
+
+  it('a failed translation leaves the Arabic visible and stored, and recording carries on', async () => {
+    const sessions = open(fakeProviders({ translator: failingOnce() })).sessions;
+    const updates: LiveUtterance[] = [];
+    sessions.subscribe((_id, u) => updates.push(u));
+
+    const s = sessions.start();
+    sessions.appendDesktopAudio(s.id, new Uint8Array([1]));
+    sessions.appendDesktopAudio(s.id, new Uint8Array([2]));
+    const done = await sessions.stop(s.id);
+
+    expect(done.status).toBe('completed');
+    expect([...readFileSync(done.desktopTrackPath)]).toEqual([1, 2]);
+    // The Arabic as usual, then the same again reporting why it has no translation.
+    expect(updates.filter((u) => u.text === 'مرحبا بكم' && u.isFinal)).toEqual([
+      expect.objectContaining({ translation: '' }),
+      expect.objectContaining({ translation: '', translationError: 'translation service down' }),
+    ]);
+    expect(updates.find((u) => u.text === 'كيف حالكم' && u.translation)).not.toHaveProperty(
+      'translationError',
+    );
+    expect(sessions.transcript(done.id)).toEqual([
+      expect.objectContaining({ text: 'مرحبا بكم', translation: '' }),
+      expect.objectContaining({ text: 'كيف حالكم', translation: 'How are you all' }),
+    ]);
+  });
+
+  it('shows the final Arabic before its translation arrives, and waits for it on stop', async () => {
+    let release!: (t: string) => void;
+    const slow: Translator = { translate: () => new Promise((resolve) => (release = resolve)) };
+    const once: SttEvent[] = [{ type: 'final', text: 'مرحبا بكم', startMs: 0, endMs: 1200 }];
+    const sessions = open(
+      fakeProviders({ speechToText: new FakeSpeechToText(once), translator: slow }),
+    ).sessions;
+    const updates: LiveUtterance[] = [];
+    sessions.subscribe((_id, u) => updates.push(u));
+
+    const s = sessions.start();
+    let stopped = false;
+    const stopping = sessions.stop(s.id).then(() => (stopped = true));
+    await vi.waitFor(() => expect(updates).toHaveLength(1));
+    expect(updates[0]).toMatchObject({ isFinal: true, text: 'مرحبا بكم', translation: '' });
+    expect(stopped).toBe(false);
+
+    release('Welcome');
+    await stopping;
+
+    expect(updates.at(-1)).toMatchObject({ isFinal: true, translation: 'Welcome' });
+    expect(sessions.transcript(s.id)[0].translation).toBe('Welcome');
   });
 });
 
