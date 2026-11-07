@@ -33,13 +33,14 @@ interface TokenRow {
   start_ms: number;
   end_ms: number;
   lemma_id: number | null;
+  gloss: string;
 }
 
 const toToken = (r: TokenRow): Token => ({
   surface: r.surface,
   startMs: r.start_ms,
   endMs: r.end_ms,
-  gloss: '', // glosses are not stored yet
+  gloss: r.gloss,
   lemmaId: r.lemma_id,
 });
 
@@ -133,6 +134,10 @@ export class Store {
     if (!tokenColumns.some((c) => c.name === 'lemma_id')) {
       this.db.exec('ALTER TABLE tokens ADD COLUMN lemma_id INTEGER REFERENCES lemmas(id)');
     }
+    // ... and before the quick gloss, without a gloss column.
+    if (!tokenColumns.some((c) => c.name === 'gloss')) {
+      this.db.exec("ALTER TABLE tokens ADD COLUMN gloss TEXT NOT NULL DEFAULT ''");
+    }
   }
 
   /** Creates a recording Session; desktopTrackPathFor derives its Desktop Track path from the new id. */
@@ -210,6 +215,19 @@ export class Store {
   /** Sets a stored Utterance's sentence translation, which arrives after the Utterance. */
   setTranslation(utteranceId: number, translation: string): void {
     this.db.prepare('UPDATE utterances SET translation = ? WHERE id = ?').run(translation, utteranceId);
+  }
+
+  /** Sets the quick gloss of an Utterance's Tokens, by Token position. */
+  setTokenGlosses(utteranceId: number, glosses: Map<number, string>): void {
+    const setGloss = this.db.prepare('UPDATE tokens SET gloss = ? WHERE utterance_id = ? AND position = ?');
+    this.db.exec('BEGIN');
+    try {
+      for (const [position, gloss] of glosses) setGloss.run(gloss, utteranceId, position);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   /**

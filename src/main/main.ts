@@ -3,7 +3,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp, type App } from '../core/app';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
-import type { ArabicAnalyzer, SpeechToText, Translator } from '../core/providers';
+import { SqliteDictionary } from '../core/dictionary/sqlite';
+import type { ArabicAnalyzer, Dictionary, SpeechToText, Translator } from '../core/providers';
 import { DeepgramSpeechToText } from '../core/stt/deepgram';
 import { SonioxSpeechToText } from '../core/stt/soniox';
 import { GoogleTranslator } from '../core/translation/google';
@@ -18,6 +19,7 @@ const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
 
 let core: App | undefined;
 let analyzer: CamelArabicAnalyzer | undefined;
+let dictionary: SqliteDictionary | undefined;
 
 function requireSessionId(value: unknown): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
@@ -71,6 +73,28 @@ function arabicAnalyzerFromBundle(): ArabicAnalyzer {
   analyzer = new CamelArabicAnalyzer({ helper });
   analyzer.start();
   return analyzer;
+}
+
+/**
+ * The bundled dictionary (GLOSSARY, Dictionary plan): built into vendor/dictionary by
+ * `npm run build:dictionary`, and shipped as resources/dictionary in packaged builds.
+ * Without it, words are glossed by the analyzer's stem gloss alone.
+ */
+function dictionaryFromBundle(): Dictionary {
+  const path = app.isPackaged
+    ? join(process.resourcesPath, 'dictionary', 'dictionary.db')
+    : join(app.getAppPath(), 'vendor', 'dictionary', 'dictionary.db');
+  if (!existsSync(path)) {
+    console.warn(`No dictionary at ${path} (npm run build:dictionary): glosses come from the analyzer only.`);
+    return new FakeDictionary();
+  }
+  try {
+    dictionary = new SqliteDictionary(path);
+    return dictionary;
+  } catch (err) {
+    console.warn(`Dictionary at ${path} is unusable (${(err as Error).message}): rebuild it.`);
+    return new FakeDictionary();
+  }
 }
 
 function registerIpc({ sessions, vocabulary }: App): void {
@@ -131,14 +155,13 @@ function loadDevEnvFile(): void {
 
 void app.whenReady().then(() => {
   loadDevEnvFile();
-  // The real dictionary adapter arrives in a later ticket; until then it runs on a fake.
   core = createApp({
     dataDir: app.getPath('userData'),
     providers: {
       speechToText: speechToTextFromEnv(process.env),
       translator: translatorFromEnv(process.env),
       arabicAnalyzer: arabicAnalyzerFromBundle(),
-      dictionary: new FakeDictionary(),
+      dictionary: dictionaryFromBundle(),
     },
   });
   registerIpc(core);
@@ -153,6 +176,7 @@ app.on('window-all-closed', () => {
     .then(() => analyzer?.close())
     .finally(() => {
       core?.close();
+      dictionary?.close();
       app.quit();
     });
 });
