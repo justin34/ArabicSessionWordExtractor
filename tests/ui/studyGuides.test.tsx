@@ -47,6 +47,7 @@ async function openSession(bridge: FakeBridge) {
   const user = userEvent.setup();
   renderApp({ bridge });
   await user.click(await screen.findByRole('button', { name: /open session/i }));
+  await user.click(screen.getByRole('tab', { name: 'Session Guide' }));
   return user;
 }
 
@@ -54,8 +55,8 @@ describe('Session Guide', () => {
   it("opens with a completed Session, listing its new words grouped, with glosses and times heard", async () => {
     await openSession(bridgeWithGuide());
 
-    expect(await screen.findByRole('heading', { name: 'Session Guide' })).toBeTruthy();
-    expect(screen.getByText('3 new words · 5 words heard')).toBeTruthy();
+    expect(await screen.findByRole('tabpanel', { name: 'Session Guide' })).toBeTruthy();
+    expect(await screen.findByText('3 new words · 5 words heard')).toBeTruthy();
     const nouns = screen.getByRole('region', { name: 'Nouns' });
     expect(within(nouns).getAllByRole('button').map((b) => b.textContent)).toEqual([
       'طالِبstudentheard 2 times',
@@ -77,7 +78,8 @@ describe('Session Guide', () => {
     expect(screen.getByRole('button', { name: 'Sessions', current: 'page' })).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: /back to session guide/i }));
-    expect(await screen.findByRole('heading', { name: 'Session Guide' })).toBeTruthy();
+    expect(await screen.findByRole('tabpanel', { name: 'Session Guide' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Session Guide', selected: true })).toBeTruthy();
   });
 
   it('says when a Session has no new words', async () => {

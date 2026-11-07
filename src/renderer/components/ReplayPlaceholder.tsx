@@ -9,8 +9,8 @@ export function ReplayPlaceholder({ onBack }: { onBack: () => void }) {
           ← Back to Sessions
         </button>
       </ScreenHeader>
-      <EmptyState title="Replay coming soon">
-        You will be able to play this Session back with the transcript highlighted.
+      <EmptyState title="Nothing to replay">
+        A Demo Session is never stored, so it has no audio or Transcript to play back.
       </EmptyState>
     </>
   );

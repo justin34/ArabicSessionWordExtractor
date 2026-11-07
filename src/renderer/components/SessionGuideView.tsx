@@ -1,9 +1,7 @@
 import { useCallback } from 'react';
-import type { ListedSession, SessionGuide } from '../bridge';
-import { formatStart, sessionDuration } from '../format';
+import type { SessionGuide } from '../bridge';
 import { useLoaded } from '../useLoaded';
 import { EmptyState } from './EmptyState';
-import { ScreenHeader } from './ScreenHeader';
 import './StudyGuides.css';
 
 const times = (n: number) => (n === 1 ? 'once' : `${n} times`);
@@ -15,21 +13,19 @@ function summary(guide: SessionGuide): string {
 }
 
 /**
- * A completed Session: its Session Guide, listing the words first heard in it, grouped,
- * each opening its Word Card. Replay View (#11) will join it here.
+ * A completed Session's Session Guide, listing the words first heard in it, grouped,
+ * each opening its Word Card.
  */
 export function SessionGuideView({
-  session,
+  sessionId,
   loadGuide,
   onOpenWord,
-  onBack,
 }: {
-  session: ListedSession;
+  sessionId: number;
   loadGuide: (sessionId: number) => Promise<SessionGuide | null>;
   onOpenWord: (lemmaId: number) => void;
-  onBack: () => void;
 }) {
-  const load = useCallback(() => loadGuide(session.id), [loadGuide, session.id]);
+  const load = useCallback(() => loadGuide(sessionId), [loadGuide, sessionId]);
   const guide = useLoaded(load);
 
   let body;
@@ -76,20 +72,5 @@ export function SessionGuideView({
       </>
     );
 
-  return (
-    <>
-      <ScreenHeader>
-        <button type="button" className="btn btn--link" onClick={onBack}>
-          ← Back to Sessions
-        </button>
-      </ScreenHeader>
-      <div className="guide__heading">
-        <h1>Session Guide</h1>
-        <p className="guide__muted">
-          {formatStart(session.startedAt)} · {sessionDuration(session, Date.now())} · Replay coming soon
-        </p>
-      </div>
-      {body}
-    </>
-  );
+  return body;
 }

@@ -23,10 +23,13 @@ export function WordPanel({
   token,
   loadDetails,
   onClose,
+  unanalyzedNote = 'Details appear once this word has been analyzed.',
 }: {
   token: Token;
   loadDetails: LoadWordDetails;
   onClose: () => void;
+  /** Shown for a word with no Lemma. */
+  unanalyzedNote?: string;
 }) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -55,7 +58,7 @@ export function WordPanel({
   }, [onClose]);
 
   let body;
-  if (lemmaId === null) body = <Message>Details appear once this word has been analyzed.</Message>;
+  if (lemmaId === null) body = <Message>{unanalyzedNote}</Message>;
   else if (load.state === 'loading') body = <Message>Loading…</Message>;
   else if (load.state === 'failed') body = <Message>{`Could not load this word’s details: ${load.message}`}</Message>;
   else if (!load.details || load.details.sections.length === 0) body = <Message>No details for this word yet.</Message>;

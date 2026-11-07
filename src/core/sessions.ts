@@ -124,6 +124,15 @@ export class Sessions {
     return this.store.getTranscript(sessionId);
   }
 
+  /** Path of a Session's Desktop Track, for Replay; undefined for a Session that does not exist. */
+  desktopTrackPath(sessionId: number): string | undefined {
+    try {
+      return this.store.getSession(sessionId).desktopTrackPath;
+    } catch {
+      return undefined;
+    }
+  }
+
   private emit(sessionId: number, update: LiveUtterance): void {
     for (const listener of this.listeners) {
       try {
