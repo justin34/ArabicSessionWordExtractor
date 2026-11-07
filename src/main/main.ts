@@ -117,9 +117,14 @@ function registerIpc({ sessions, vocabulary, words, guides }: App): void {
       win.webContents.send('transcript:update', sessionId, update);
     }
   });
-  ipcMain.handle('sessions:start', () => sessions.start());
+  ipcMain.handle('sessions:start', (_event, options: unknown) =>
+    sessions.start('webm', { mic: (options as { mic?: unknown } | undefined)?.mic === true }),
+  );
   ipcMain.handle('sessions:appendDesktopAudio', (_event, id: unknown, chunk: unknown) =>
     sessions.appendDesktopAudio(requireSessionId(id), requireChunk(chunk)),
+  );
+  ipcMain.handle('sessions:appendMicAudio', (_event, id: unknown, chunk: unknown) =>
+    sessions.appendMicAudio(requireSessionId(id), requireChunk(chunk)),
   );
   ipcMain.handle('sessions:stop', (_event, id: unknown) => sessions.stop(requireSessionId(id)));
   ipcMain.handle('sessions:list', () => sessions.list());
@@ -136,8 +141,9 @@ function registerIpc({ sessions, vocabulary, words, guides }: App): void {
 }
 
 /**
- * Replay reads Session audio from `session-audio://desktop/<id>`: only Desktop Tracks of
- * stored Sessions, never an arbitrary path. Ranges are honoured so the player can seek.
+ * Replay reads Session audio from `session-audio://desktop/<id>` and `session-audio://mic/<id>`:
+ * only the Desktop and Mic Tracks of stored Sessions, never an arbitrary path. Ranges are
+ * honoured so the player can seek.
  */
 const AUDIO_SCHEME = 'session-audio';
 protocol.registerSchemesAsPrivileged([
@@ -148,8 +154,14 @@ function serveSessionAudio({ sessions }: App): void {
   protocol.handle(AUDIO_SCHEME, (request) => {
     const url = new URL(request.url);
     const id = Number(url.pathname.replace(/^\//, ''));
-    const path =
-      url.hostname === 'desktop' && Number.isInteger(id) && id > 0 ? sessions.desktopTrackPath(id) : undefined;
+    const valid = Number.isInteger(id) && id > 0;
+    const path = !valid
+      ? undefined
+      : url.hostname === 'desktop'
+        ? sessions.desktopTrackPath(id)
+        : url.hostname === 'mic'
+          ? sessions.micTrackPath(id)
+          : undefined;
     if (!path) return new Response('No such track', { status: 404 });
     return audioFileResponse(path, request.headers.get('range'));
   });

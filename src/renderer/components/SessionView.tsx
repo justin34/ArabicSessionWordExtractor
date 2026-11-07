@@ -21,6 +21,7 @@ export function SessionView({
   tab,
   onTabChange,
   audioUrl,
+  micAudioUrl,
   loadTranscript,
   loadWordDetails,
   loadGuide,
@@ -31,6 +32,8 @@ export function SessionView({
   tab: SessionTab;
   onTabChange: (tab: SessionTab) => void;
   audioUrl: string;
+  /** The Mic Track, when the Session has one; played in sync with the Desktop Track. */
+  micAudioUrl?: string;
   loadTranscript: (sessionId: number) => Promise<Utterance[]>;
   loadWordDetails: LoadWordDetails;
   loadGuide: (sessionId: number) => Promise<SessionGuide | null>;
@@ -75,6 +78,7 @@ export function SessionView({
         <ReplayView
           sessionId={session.id}
           audioUrl={audioUrl}
+          micAudioUrl={micAudioUrl}
           fallbackDurationMs={lengthMs}
           loadTranscript={loadTranscript}
           loadWordDetails={loadWordDetails}

@@ -10,6 +10,8 @@ import type { LiveUtterance, Session, Token, TranscriptListener, Utterance } fro
 
 interface LiveSession {
   desktopTrackPath: string;
+  /** Null when the learner chose not to record the microphone. Never transcribed. */
+  micTrackPath: string | null;
   audio: AudioChannel;
   /** False once speech-to-text has failed; audio then goes to the Desktop Track only. */
   transcribing: boolean;
@@ -50,14 +52,21 @@ export class Sessions {
     store.completeAbandonedSessions(new Date().toISOString());
   }
 
-  /** Begins a live Session. `extension` is the Desktop Track's audio file type. */
-  start(extension = 'webm'): Session {
-    const session = this.store.createSession(new Date().toISOString(), (id) =>
-      join(this.recordingsDir, `session-${id}-desktop.${extension}`),
+  /**
+   * Begins a live Session. `extension` is the Desktop Track's audio file type; with `mic`,
+   * the Session also has a Mic Track, a separate file of the same type.
+   */
+  start(extension = 'webm', { mic = false }: { mic?: boolean } = {}): Session {
+    const session = this.store.createSession(
+      new Date().toISOString(),
+      (id) => join(this.recordingsDir, `session-${id}-desktop.${extension}`),
+      mic ? (id) => join(this.recordingsDir, `session-${id}-mic.${extension}`) : undefined,
     );
     writeFileSync(session.desktopTrackPath, new Uint8Array());
+    if (session.micTrackPath) writeFileSync(session.micTrackPath, new Uint8Array());
     const live: LiveSession = {
       desktopTrackPath: session.desktopTrackPath,
+      micTrackPath: session.micTrackPath,
       audio: new AudioChannel(),
       transcribing: true,
       transcribed: Promise.resolve(),
@@ -73,6 +82,14 @@ export class Sessions {
     if (!live) throw new Error(`Session ${sessionId} is not recording`);
     appendFileSync(live.desktopTrackPath, chunk);
     if (live.transcribing) live.audio.push(chunk);
+  }
+
+  /** Writes microphone audio to the Session's Mic Track. It is never sent for transcription. */
+  appendMicAudio(sessionId: number, chunk: Uint8Array): void {
+    const live = this.live.get(sessionId);
+    if (!live) throw new Error(`Session ${sessionId} is not recording`);
+    if (!live.micTrackPath) throw new Error(`Session ${sessionId} has no Mic Track`);
+    appendFileSync(live.micTrackPath, chunk);
   }
 
   /**
@@ -128,6 +145,15 @@ export class Sessions {
   desktopTrackPath(sessionId: number): string | undefined {
     try {
       return this.store.getSession(sessionId).desktopTrackPath;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Path of a Session's Mic Track, for Replay; undefined when it has none or does not exist. */
+  micTrackPath(sessionId: number): string | undefined {
+    try {
+      return this.store.getSession(sessionId).micTrackPath ?? undefined;
     } catch {
       return undefined;
     }

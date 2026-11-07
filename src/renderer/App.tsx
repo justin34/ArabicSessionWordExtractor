@@ -5,6 +5,7 @@ import type {
   DemoFeed,
   DesktopAudioCapture,
   ListedSession,
+  MicAudioCapture,
   LiveUtterance,
   Unsubscribe,
   VocabularyEntry,
@@ -28,6 +29,8 @@ import './App.css';
 export interface AppProps {
   bridge: Bridge;
   capture: DesktopAudioCapture;
+  /** Opens the microphone when the learner chooses a Mic Track. */
+  micCapture: MicAudioCapture;
   /** Present only in dev builds; enables the Demo Session. */
   demoFeed?: DemoFeed;
 }
@@ -47,8 +50,11 @@ function destinationOf(route: Route): Destination {
 interface ActiveRecording {
   sessionId: number;
   capture: AudioCapture;
-  /** Serializes audio writes so chunks reach the main process in order. Never rejects. */
+  /** The microphone, when the Session has a Mic Track. */
+  mic: AudioCapture | null;
+  /** Serializes each track's writes so chunks reach the main process in order. Never reject. */
   writes: Promise<void>;
+  micWrites: Promise<void>;
   writeError: Error | null;
 }
 
@@ -58,7 +64,7 @@ function sortNewestFirst(list: ListedSession[]): ListedSession[] {
   );
 }
 
-export function App({ bridge, capture, demoFeed }: AppProps) {
+export function App({ bridge, capture, micCapture, demoFeed }: AppProps) {
   const [route, setRoute] = useState<Route>({ name: 'sessions' });
   const [realSessions, setRealSessions] = useState<ListedSession[]>([]);
   const [demoSessions, setDemoSessions] = useState<ListedSession[]>([]);
@@ -124,7 +130,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
 
   const now = useNow(sessions.some((s) => s.status === 'recording'));
 
-  async function startRecording(): Promise<void> {
+  async function startRecording({ mic: withMic }: { mic: boolean }): Promise<void> {
     if (starting.current || active.current) return;
     starting.current = true;
     setStartPanelOpen(false);
@@ -141,32 +147,50 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
       );
       return;
     }
+    let mic: AudioCapture | null = null;
+    if (withMic) {
+      try {
+        mic = await micCapture.open();
+      } catch (err) {
+        starting.current = false;
+        await audio.stop().catch(() => undefined);
+        setNotice(`Could not open the microphone: ${(err as Error).message}`);
+        return;
+      }
+    }
     let createdId: number | null = null;
     try {
-      const created = await bridge.startSession();
+      const created = await bridge.startSession({ mic: mic !== null });
       createdId = created.id;
       const rec: ActiveRecording = {
         sessionId: created.id,
         capture: audio,
+        mic,
         writes: Promise.resolve(),
+        micWrites: Promise.resolve(),
         writeError: null,
       };
+      const write = async (append: () => Promise<void>) => {
+        try {
+          await append();
+        } catch (err) {
+          rec.writeError = err as Error;
+        }
+      };
+      // Both tracks begin together so Replay can play them in sync.
       audio.begin((chunk) => {
-        rec.writes = rec.writes.then(async () => {
-          try {
-            await bridge.appendDesktopAudio(created.id, chunk);
-          } catch (err) {
-            rec.writeError = err as Error;
-          }
-        });
+        rec.writes = rec.writes.then(() => write(() => bridge.appendDesktopAudio(created.id, chunk)));
+      });
+      mic?.begin((chunk) => {
+        rec.micWrites = rec.micWrites.then(() => write(() => bridge.appendMicAudio(created.id, chunk)));
       });
       active.current = rec;
       setActiveId(created.id);
       await refresh();
       setRoute({ name: 'live', sessionKey: String(created.id) });
     } catch (err) {
-      // Release the capture and close any Session row that was already created.
-      await audio.stop().catch(() => undefined);
+      // Release the captures and close any Session row that was already created.
+      await Promise.all([audio.stop(), mic?.stop()].map((p) => p?.catch(() => undefined)));
       if (createdId !== null) await bridge.stopSession(createdId).catch(() => undefined);
       active.current = null;
       setActiveId(null);
@@ -194,8 +218,8 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
     const rec = active.current?.sessionId === session.id ? active.current : null;
     try {
       if (rec) {
-        await rec.capture.stop();
-        await rec.writes;
+        await Promise.all([rec.capture.stop(), rec.mic?.stop()]);
+        await Promise.all([rec.writes, rec.micWrites]);
       }
       await bridge.stopSession(session.id);
       if (rec?.writeError) {
@@ -224,6 +248,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
       endedAt: null,
       status: 'recording',
       desktopTrackPath: '',
+      micTrackPath: null,
       isDemo: true,
     };
     setDemoSessions((list) => [...list, demo]);
@@ -302,6 +327,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
               tab={route.tab}
               onTabChange={(tab) => setRoute({ ...route, tab })}
               audioUrl={bridge.desktopTrackUrl(route.session.id)}
+              micAudioUrl={route.session.micTrackPath ? bridge.micTrackUrl(route.session.id) : undefined}
               loadTranscript={loadTranscript}
               loadWordDetails={loadWordDetails}
               loadGuide={loadSessionGuide}
@@ -335,7 +361,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
         )}
       </main>
       {startPanelOpen && (
-        <StartPanel onStart={() => void startRecording()} onCancel={() => setStartPanelOpen(false)} />
+        <StartPanel onStart={(options) => void startRecording(options)} onCancel={() => setStartPanelOpen(false)} />
       )}
     </div>
   );

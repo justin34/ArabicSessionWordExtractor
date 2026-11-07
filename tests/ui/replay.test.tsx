@@ -215,3 +215,70 @@ describe('Replay View', () => {
     expect(screen.getByText('database closed')).toBeTruthy();
   });
 });
+
+describe('Replay with a Mic Track', () => {
+  async function openWithMic() {
+    const bridge = new FakeBridge([session({ id: 1, micTrackPath: 'session-1-mic.webm' })]);
+    bridge.transcripts.set(1, transcript);
+    const user = userEvent.setup();
+    const view = renderApp({ bridge });
+    await user.click(await screen.findByRole('button', { name: /open session/i }));
+    await screen.findByText('Welcome');
+    const desktop = view.container.querySelector<HTMLAudioElement>('audio[data-track="desktop"]')!;
+    const mic = view.container.querySelector<HTMLAudioElement>('audio[data-track="mic"]')!;
+    return { user, desktop, mic, desktopPlayer: fakePlayer(desktop), micPlayer: fakePlayer(mic) };
+  }
+
+  it('plays only the Desktop Track for a Session without one', async () => {
+    const { audio } = await openReplay();
+    expect(audio.getAttribute('data-track')).toBe('desktop');
+    expect(document.querySelector('audio[data-track="mic"]')).toBeNull();
+  });
+
+  it('plays, pauses and seeks the Mic Track together with the Desktop Track', async () => {
+    const { user, desktop, mic, micPlayer } = await openWithMic();
+    expect(mic.getAttribute('src')).toBe('session-audio://mic/1');
+
+    await user.click(screen.getByRole('button', { name: 'Play' }));
+    expect(desktop.play).toHaveBeenCalled();
+    expect(mic.play).toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(mic.pause).toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Playback position' }), { target: { value: '5000' } });
+    expect(micPlayer.time).toBe(5);
+
+    await user.click(within(sentences()[1]).getByText('They wrote the lesson.'));
+    expect(micPlayer.time).toBe(2);
+    expect(mic.play).toHaveBeenCalledTimes(2);
+  });
+
+  it('moves the Mic Track back in step when it drifts while playing', async () => {
+    const { user, desktopPlayer, micPlayer } = await openWithMic();
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => frames.push(cb));
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+    await user.click(screen.getByRole('button', { name: 'Play' }));
+
+    desktopPlayer.reach(3000);
+    act(() => frames.at(-1)!(0));
+    expect(micPlayer.time).toBe(3);
+
+    // A small drift is left alone.
+    micPlayer.reach(3100);
+    act(() => frames.at(-1)!(0));
+    expect(micPlayer.time).toBeCloseTo(3.1);
+  });
+
+  it('keeps playing the desktop audio when the Mic Track cannot be played', async () => {
+    const { user, desktop, mic } = await openWithMic();
+    fireEvent.error(mic);
+    expect(screen.getByText(/microphone track can’t be played/)).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Play' }));
+    expect(desktop.play).toHaveBeenCalled();
+    expect(mic.play).not.toHaveBeenCalled();
+  });
+});
+

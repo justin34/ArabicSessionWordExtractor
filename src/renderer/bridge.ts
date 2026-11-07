@@ -17,14 +17,19 @@ export type Unsubscribe = () => void;
  * preload bridge; tests substitute a fake.
  */
 export interface Bridge {
-  startSession(): Promise<Session>;
+  /** With `mic`, the Session also records a Mic Track. */
+  startSession(options?: { mic: boolean }): Promise<Session>;
   appendDesktopAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
+  /** Writes to the Session's Mic Track; it is never transcribed. */
+  appendMicAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
   stopSession(sessionId: number): Promise<Session>;
   listSessions(): Promise<Session[]>;
   /** A Session's stored Transcript, in order. */
   transcript(sessionId: number): Promise<Utterance[]>;
   /** Where Replay loads a Session's Desktop Track from. */
   desktopTrackUrl(sessionId: number): string;
+  /** Where Replay loads a Session's Mic Track from, when it has one. */
+  micTrackUrl(sessionId: number): string;
   /** The whole Vocabulary, most recently first heard first. */
   listVocabulary(): Promise<VocabularyEntry[]>;
   /** The word panel's Detail Module sections for a Lemma; null when it is not in the Vocabulary. */
@@ -44,7 +49,7 @@ export class NoDesktopAudioError extends Error {
   }
 }
 
-/** An open desktop-audio capture that is not recording yet. */
+/** An open audio capture (desktop or microphone) that is not recording yet. */
 export interface AudioCapture {
   /** Begin recording; chunks are delivered in order. */
   begin(onChunk: (chunk: Uint8Array) => void): void;
@@ -56,6 +61,11 @@ export interface AudioCapture {
 
 export interface DesktopAudioCapture {
   /** Throws NoDesktopAudioError when no desktop audio is available. */
+  open(): Promise<AudioCapture>;
+}
+
+/** Opens the microphone for a Session's Mic Track. Throws when it cannot be opened. */
+export interface MicAudioCapture {
   open(): Promise<AudioCapture>;
 }
 

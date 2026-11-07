@@ -6,6 +6,8 @@ export interface Session {
   endedAt: string | null;
   status: SessionStatus;
   desktopTrackPath: string;
+  /** The optional Mic Track, chosen at Session start; never transcribed. Null without one. */
+  micTrackPath: string | null;
 }
 
 /** One word occurrence in an Utterance. */
