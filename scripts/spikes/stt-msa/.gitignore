@@ -1,0 +1,4 @@
+# API keys and private audio never get committed.
+.env
+clips/
+results/
