@@ -2,9 +2,10 @@ import { app, BrowserWindow, desktopCapturer, ipcMain, session } from 'electron'
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp, type App } from '../core/app';
-import type { SpeechToText } from '../core/providers';
+import type { SpeechToText, Translator } from '../core/providers';
 import { DeepgramSpeechToText } from '../core/stt/deepgram';
 import { SonioxSpeechToText } from '../core/stt/soniox';
+import { GoogleTranslator } from '../core/translation/google';
 import {
   FakeArabicAnalyzer,
   FakeDictionary,
@@ -39,6 +40,13 @@ function speechToTextFromEnv(env: NodeJS.ProcessEnv): SpeechToText {
   if (env.DEEPGRAM_API_KEY) return new DeepgramSpeechToText({ apiKey: env.DEEPGRAM_API_KEY });
   console.warn('No SONIOX_API_KEY or DEEPGRAM_API_KEY set: Sessions record without a transcript.');
   return new FakeSpeechToText([]);
+}
+
+/** Google Cloud Translation (GLOSSARY, Sentence translation); without a key, no translations. */
+function translatorFromEnv(env: NodeJS.ProcessEnv): Translator {
+  if (env.GOOGLE_TRANSLATE_API_KEY) return new GoogleTranslator({ apiKey: env.GOOGLE_TRANSLATE_API_KEY });
+  console.warn('No GOOGLE_TRANSLATE_API_KEY set: Utterances show without a sentence translation.');
+  return new FakeTranslator();
 }
 
 function registerIpc(sessions: App['sessions']): void {
@@ -98,12 +106,12 @@ function loadDevEnvFile(): void {
 
 void app.whenReady().then(() => {
   loadDevEnvFile();
-  // Real Google and CAMeL adapters arrive in later tickets; until then those run on fakes.
+  // The real CAMeL and dictionary adapters arrive in later tickets; until then those run on fakes.
   core = createApp({
     dataDir: app.getPath('userData'),
     providers: {
       speechToText: speechToTextFromEnv(process.env),
-      translator: new FakeTranslator(),
+      translator: translatorFromEnv(process.env),
       arabicAnalyzer: new FakeArabicAnalyzer(),
       dictionary: new FakeDictionary(),
     },

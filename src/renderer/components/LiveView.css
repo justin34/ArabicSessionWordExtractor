@@ -49,3 +49,16 @@
   inset-inline-end: var(--space-4);
   box-shadow: var(--shadow-raised);
 }
+.live__warning {
+  margin-block-start: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-1);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+.live__warning-detail {
+  display: block;
+  margin-block-start: var(--space-1);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}

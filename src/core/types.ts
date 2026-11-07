@@ -44,6 +44,8 @@ export interface LiveUtterance {
   translation: string;
   /** Tokens with timings and glosses; empty while interim. */
   tokens: Token[];
+  /** Why this final Utterance could not be translated; set only on the update reporting it. */
+  translationError?: string;
 }
 
 export type TranscriptListener = (sessionId: number, update: LiveUtterance) => void;

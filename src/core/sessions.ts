@@ -12,12 +12,14 @@ interface LiveSession {
   transcribing: boolean;
   /** Settles when the provider pipeline has drained. Never rejects. */
   transcribed: Promise<void>;
+  /** Sentence translations still in flight. Each settles, never rejects. */
+  translations: Set<Promise<void>>;
 }
 
 /**
  * The Session pipeline. Desktop audio streamed into a live Session is written to its
  * Desktop Track and, at the same time, fed to speech-to-text; each final Utterance is
- * translated and stored in the Session's Transcript.
+ * stored in the Session's Transcript and shown at once, then translated alongside.
  */
 export class Sessions {
   private readonly live = new Map<number, LiveSession>();
@@ -44,6 +46,7 @@ export class Sessions {
       audio: new AudioChannel(),
       transcribing: true,
       transcribed: Promise.resolve(),
+      translations: new Set(),
     };
     this.live.set(session.id, live);
     live.transcribed = this.transcribe(session.id, live);
@@ -64,6 +67,8 @@ export class Sessions {
     this.live.delete(sessionId);
     live.audio.close();
     await live.transcribed;
+    // Translations started by the last Utterances finish before the Session completes.
+    while (live.translations.size > 0) await Promise.all(live.translations);
     return this.store.completeSession(sessionId, new Date().toISOString());
   }
 
@@ -120,7 +125,6 @@ export class Sessions {
           continue;
         }
         utteranceIndex++;
-        const translation = await this.providers.translator.translate(event.text);
         // Glosses and Lemmas attach once Arabic analysis is wired in.
         const tokens: Token[] = (event.words ?? []).map((w) => ({
           surface: w.text,
@@ -129,15 +133,21 @@ export class Sessions {
           gloss: '',
           lemmaId: null,
         }));
-        this.store.addUtterance({
+        const final: LiveUtterance = { id, isFinal: true, text: event.text, translation: '', tokens };
+        const utteranceId = this.store.addUtterance({
           sessionId,
           text: event.text,
-          translation,
+          translation: '',
           startMs: event.startMs,
           endMs: event.endMs,
           tokens,
         });
-        this.emit(sessionId, { id, isFinal: true, text: event.text, translation, tokens });
+        this.emit(sessionId, final);
+        // Translating does not hold up the next Utterance's speech-to-text.
+        const translating = this.translate(sessionId, utteranceId, final).finally(() =>
+          live.translations.delete(translating),
+        );
+        live.translations.add(translating);
       }
     } catch (err) {
       // The Desktop Track is written independently; a provider failure must never lose audio.
@@ -145,6 +155,20 @@ export class Sessions {
     } finally {
       // Nothing reads the channel any more, so stop queueing audio into it.
       live.transcribing = false;
+    }
+  }
+
+  /** Adds the sentence translation to a final Utterance. A failure leaves it untranslated. */
+  private async translate(sessionId: number, utteranceId: number, final: LiveUtterance): Promise<void> {
+    try {
+      const translation = await this.providers.translator.translate(final.text);
+      if (!translation) return;
+      this.store.setTranslation(utteranceId, translation);
+      this.emit(sessionId, { ...final, translation });
+    } catch (err) {
+      console.error(`Translation failed for an Utterance in Session ${sessionId}:`, err);
+      // The Arabic stays as it is; Live View warns that translation is not working.
+      this.emit(sessionId, { ...final, translationError: (err as Error).message || String(err) });
     }
   }
 }

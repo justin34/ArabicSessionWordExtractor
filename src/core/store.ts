@@ -136,8 +136,8 @@ export class Store {
     return rows.map(toSession);
   }
 
-  /** Stores a final Utterance and its Tokens together. */
-  addUtterance(u: Omit<Utterance, 'id'>): void {
+  /** Stores a final Utterance and its Tokens together; returns the Utterance's id. */
+  addUtterance(u: Omit<Utterance, 'id'>): number {
     this.db.exec('BEGIN');
     try {
       const id = this.db
@@ -150,10 +150,16 @@ export class Store {
       );
       u.tokens.forEach((t, i) => insertToken.run(id, i, t.surface, t.startMs, t.endMs));
       this.db.exec('COMMIT');
+      return Number(id);
     } catch (err) {
       this.db.exec('ROLLBACK');
       throw err;
     }
+  }
+
+  /** Sets a stored Utterance's sentence translation, which arrives after the Utterance. */
+  setTranslation(utteranceId: number, translation: string): void {
+    this.db.prepare('UPDATE utterances SET translation = ? WHERE id = ?').run(translation, utteranceId);
   }
 
   getTranscript(sessionId: number): Utterance[] {
