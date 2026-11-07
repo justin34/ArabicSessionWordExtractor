@@ -8,7 +8,7 @@
  */
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** One Arabic dictionary entry: a headword with one part of speech and its senses. */
 export interface DictionaryRow {
@@ -20,6 +20,8 @@ export interface DictionaryRow {
   partOfSpeech: string;
   /** Glosses of the entry's real senses, in order: no "plural of …" style form-of senses. */
   definitions: string[];
+  /** Wiktionary's etymology of the headword, when it gives one. */
+  etymology?: string;
 }
 
 /** One Tatoeba sentence pair. */
@@ -69,6 +71,7 @@ interface WiktextractEntry {
   pos?: unknown;
   senses?: unknown;
   forms?: unknown;
+  etymology_text?: unknown;
 }
 
 const strings = (value: unknown): string[] =>
@@ -98,7 +101,20 @@ export function wiktionaryRow(entry: WiktextractEntry): DictionaryRow | null {
   const forms = (Array.isArray(entry.forms) ? entry.forms : []) as Array<{ form?: unknown; tags?: unknown }>;
   const canonical = forms.find((f) => typeof f.form === 'string' && strings(f.tags).includes('canonical'));
   const headword = ((canonical?.form as string | undefined) ?? entry.word).normalize('NFC').trim();
-  return { word, headword, partOfSpeech: entry.pos, definitions };
+  const etymology = typeof entry.etymology_text === 'string' ? entry.etymology_text.trim() : '';
+  return { word, headword, partOfSpeech: entry.pos, definitions, ...(etymology && { etymology }) };
+}
+
+/**
+ * The words of an example sentence, as lookup keys (see `bareKey`): split on spaces,
+ * without punctuation. An example is found by any of its words.
+ */
+export function exampleWords(sentence: string): string[] {
+  const words = sentence
+    .split(/\s+/)
+    .map((w) => bareKey(w.replace(/[\p{P}\p{S}]/gu, '')))
+    .filter((w) => /\p{L}/u.test(w));
+  return [...new Set(words)];
 }
 
 /** Writes the dictionary database at `path`, which must not exist yet. */
@@ -106,6 +122,7 @@ export class DictionaryWriter {
   private readonly db: DatabaseSync;
   private readonly insertEntry: StatementSync;
   private readonly insertExample: StatementSync;
+  private readonly insertExampleWord: StatementSync;
   private entries = 0;
   private examples = 0;
 
@@ -120,28 +137,43 @@ export class DictionaryWriter {
         word TEXT NOT NULL,
         headword TEXT NOT NULL,
         pos TEXT NOT NULL,
-        definitions TEXT NOT NULL -- JSON array of strings
+        definitions TEXT NOT NULL, -- JSON array of strings
+        etymology TEXT
       );
       CREATE TABLE examples (
         id INTEGER PRIMARY KEY,
         arabic TEXT NOT NULL,
         english TEXT NOT NULL
       );
+      -- Each word of each example, by its lookup key.
+      CREATE TABLE example_words (
+        word TEXT NOT NULL,
+        example_id INTEGER NOT NULL REFERENCES examples(id),
+        PRIMARY KEY (word, example_id)
+      ) WITHOUT ROWID;
       BEGIN;
     `);
     this.insertEntry = this.db.prepare(
-      'INSERT INTO entries (word, headword, pos, definitions) VALUES (?, ?, ?, ?)',
+      'INSERT INTO entries (word, headword, pos, definitions, etymology) VALUES (?, ?, ?, ?, ?)',
     );
     this.insertExample = this.db.prepare('INSERT INTO examples (arabic, english) VALUES (?, ?)');
+    this.insertExampleWord = this.db.prepare('INSERT INTO example_words (word, example_id) VALUES (?, ?)');
   }
 
   addEntry(row: DictionaryRow): void {
-    this.insertEntry.run(row.word, row.headword, row.partOfSpeech, JSON.stringify(row.definitions));
+    this.insertEntry.run(
+      row.word,
+      row.headword,
+      row.partOfSpeech,
+      JSON.stringify(row.definitions),
+      row.etymology ?? null,
+    );
     this.entries++;
   }
 
   addExample(pair: ExamplePair): void {
-    this.insertExample.run(pair.arabic, pair.english);
+    const id = this.insertExample.run(pair.arabic, pair.english).lastInsertRowid;
+    for (const word of exampleWords(pair.arabic)) this.insertExampleWord.run(word, id);
     this.examples++;
   }
 

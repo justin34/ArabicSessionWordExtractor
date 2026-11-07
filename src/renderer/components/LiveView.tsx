@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ListedSession, LiveUtterance } from '../bridge';
 import { sessionDuration } from '../format';
 import { Badge } from './Badge';
 import { EmptyState } from './EmptyState';
 import { UtteranceView } from './UtteranceView';
+import { WordPanel, type LoadWordDetails } from './WordPanel';
 import './LiveView.css';
 
 function LevelMeter({ getLevel }: { getLevel: () => number }) {
@@ -51,6 +52,7 @@ export function LiveView({
   getLevel,
   onStop,
   onBack,
+  loadWordDetails,
 }: {
   session: ListedSession;
   now: number;
@@ -59,6 +61,7 @@ export function LiveView({
   getLevel?: () => number;
   onStop: () => void;
   onBack: () => void;
+  loadWordDetails: LoadWordDetails;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
   // Following the live edge; pauses when the learner scrolls up.
@@ -76,6 +79,14 @@ export function LiveView({
   }
 
   const translationError = latestTranslationError(utterances);
+
+  // The word whose panel is open. Its Token is read from the latest update, so a Lemma
+  // that arrives after the click still fills the panel.
+  const [selected, setSelected] = useState<{ utteranceId: string; position: number } | null>(null);
+  const selectedToken = selected
+    ? utterances.find((u) => u.id === selected.utteranceId)?.tokens[selected.position]
+    : undefined;
+  const closePanel = useCallback(() => setSelected(null), []);
 
   return (
     <div className="live">
@@ -102,13 +113,21 @@ export function LiveView({
             </EmptyState>
           )}
           {utterances.map((u) => (
-            <UtteranceView key={u.id} utterance={u} />
+            <UtteranceView
+              key={u.id}
+              utterance={u}
+              selectedWord={selectedToken && selected?.utteranceId === u.id ? selected.position : null}
+              onSelectWord={(position) => setSelected({ utteranceId: u.id, position })}
+            />
           ))}
         </div>
         {!following && (
           <button type="button" className="btn btn--primary live__jump" onClick={() => setFollowing(true)}>
             Jump to latest
           </button>
+        )}
+        {selectedToken && (
+          <WordPanel token={selectedToken} loadDetails={loadWordDetails} onClose={closePanel} />
         )}
       </div>
     </div>

@@ -243,6 +243,10 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
     () => (audioCapture ? audioCapture.level() : 0),
     [audioCapture],
   );
+  const loadWordDetails = useCallback(
+    (lemmaId: number, surface: string) => bridge.wordDetails(lemmaId, surface),
+    [bridge],
+  );
 
   return (
     <div className="app">
@@ -274,6 +278,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
             getLevel={liveSession.isDemo ? undefined : getLevel}
             onStop={() => void stopSession(liveSession)}
             onBack={goSessions}
+            loadWordDetails={loadWordDetails}
           />
         )}
         {route.name === 'replay' && <ReplayPlaceholder onBack={goSessions} />}

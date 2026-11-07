@@ -11,9 +11,19 @@ function ArabicText({ text }: { text: string }) {
 
 /**
  * One Utterance: muted Arabic while interim; once final, word columns with their glosses
- * (plain Arabic until glosses exist) plus the sentence translation.
+ * (plain Arabic until glosses exist) plus the sentence translation. Each word column opens
+ * the word panel when clicked.
  */
-export function UtteranceView({ utterance }: { utterance: LiveUtterance }) {
+export function UtteranceView({
+  utterance,
+  selectedWord = null,
+  onSelectWord,
+}: {
+  utterance: LiveUtterance;
+  /** Position of the word whose panel is open, if it is in this Utterance. */
+  selectedWord?: number | null;
+  onSelectWord?: (position: number) => void;
+}) {
   if (!utterance.isFinal) {
     return (
       <article className="utterance utterance--interim" data-state="interim">
@@ -26,10 +36,23 @@ export function UtteranceView({ utterance }: { utterance: LiveUtterance }) {
       {utterance.tokens.some((t) => t.gloss) ? (
         <div className="utterance__words" dir="rtl">
           {utterance.tokens.map((t, i) => (
-            <span key={i} className="word" role="group">
-              <span className="word__ar" lang="ar">
-                {t.surface}
-              </span>
+            <span key={i} className={i === selectedWord ? 'word word--selected' : 'word'} role="group">
+              {onSelectWord ? (
+                <button
+                  type="button"
+                  className="word__ar word__button"
+                  lang="ar"
+                  aria-pressed={i === selectedWord}
+                  aria-label={`Show details for ${t.surface}`}
+                  onClick={() => onSelectWord(i)}
+                >
+                  {t.surface}
+                </button>
+              ) : (
+                <span className="word__ar" lang="ar">
+                  {t.surface}
+                </span>
+              )}
               <span className="word__gloss" lang="en" dir="ltr">
                 {t.gloss}
               </span>

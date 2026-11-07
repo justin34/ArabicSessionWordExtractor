@@ -70,14 +70,25 @@ export interface DictionaryEntry {
   partOfSpeech?: string;
   /** Senses, most common first. */
   definitions: string[];
+  /** Where the word comes from, when the dictionary says. */
+  etymology?: string;
+}
+
+/** A general example sentence with its English translation. */
+export interface ExampleSentence {
+  arabic: string;
+  english: string;
 }
 
 /**
- * Dictionary: dictionary form (Lemma) in, definitions out. The analyzer's part of speech,
- * when given, helps pick between entries spelled alike.
+ * Dictionary: dictionary form (Lemma) in, definitions and etymology out. The analyzer's
+ * part of speech, when given, helps pick between entries spelled alike. Example sentences
+ * are found by the spellings of a word (its Lemma and the surface forms heard).
  */
 export interface Dictionary {
   lookup(lemma: string, partOfSpeech?: string): Promise<DictionaryEntry | undefined>;
+  /** Example sentences containing any of `words` as a whole word, at most `limit`. */
+  examples(words: string[], limit: number): Promise<ExampleSentence[]>;
 }
 
 export interface Providers {

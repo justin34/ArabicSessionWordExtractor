@@ -2,6 +2,7 @@ import type {
   ArabicAnalyzer,
   Dictionary,
   DictionaryEntry,
+  ExampleSentence,
   SpeechToText,
   SttEvent,
   TokenAnalysis,
@@ -51,12 +52,26 @@ export class FakeArabicAnalyzer implements ArabicAnalyzer {
   }
 }
 
-/** Looks Lemmas up in a small fixed table. */
+/**
+ * Looks Lemmas up in a small fixed table. Examples are found by whole words, spelled
+ * exactly as given.
+ */
 export class FakeDictionary implements Dictionary {
-  constructor(private readonly entries: Record<string, string[]> = {}) {}
+  constructor(
+    private readonly entries: Record<string, string[] | Omit<DictionaryEntry, 'lemma'>> = {},
+    private readonly sentences: ExampleSentence[] = [],
+  ) {}
 
   async lookup(lemma: string): Promise<DictionaryEntry | undefined> {
-    const definitions = this.entries[lemma];
-    return definitions ? { lemma, definitions } : undefined;
+    const entry = this.entries[lemma];
+    if (!entry) return undefined;
+    return Array.isArray(entry) ? { lemma, definitions: entry } : { lemma, ...entry };
+  }
+
+  async examples(words: string[], limit: number): Promise<ExampleSentence[]> {
+    const wanted = new Set(words);
+    return this.sentences
+      .filter((s) => s.arabic.split(/\s+/).some((w) => wanted.has(w.replace(/[\p{P}\p{S}]/gu, ''))))
+      .slice(0, limit);
   }
 }

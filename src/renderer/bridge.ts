@@ -1,6 +1,6 @@
-import type { LiveUtterance, Session, VocabularyEntry } from '../core/types';
+import type { LiveUtterance, Session, VocabularyEntry, WordDetails } from '../core/types';
 
-export type { LiveUtterance, VocabularyEntry };
+export type { LiveUtterance, VocabularyEntry, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -15,6 +15,8 @@ export interface Bridge {
   listSessions(): Promise<Session[]>;
   /** The whole Vocabulary, most recently first heard first. */
   listVocabulary(): Promise<VocabularyEntry[]>;
+  /** The word panel's Detail Module sections for a Lemma; null when it is not in the Vocabulary. */
+  wordDetails(lemmaId: number, surface?: string): Promise<WordDetails | null>;
   /** Live transcript for a real Session. Nothing is connected to it yet. */
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void): Unsubscribe;
 }
