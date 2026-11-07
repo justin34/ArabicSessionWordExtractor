@@ -1,4 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session } from 'electron';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp, type App } from '../core/app';
 import type { SpeechToText } from '../core/providers';
@@ -84,7 +85,19 @@ function createWindow(): void {
   else void win.loadFile(join(__dirname, '..', 'renderer', 'index.html'));
 }
 
+/**
+ * Dev and `npm start` read API keys from a git-ignored `.env` at the repo root (see
+ * .env.example). Variables already set in the environment win. Packaged builds never
+ * read it; keys there come from the settings screen (#13).
+ */
+function loadDevEnvFile(): void {
+  if (app.isPackaged) return;
+  const path = join(app.getAppPath(), '.env');
+  if (existsSync(path)) process.loadEnvFile(path);
+}
+
 void app.whenReady().then(() => {
+  loadDevEnvFile();
   // Real Google and CAMeL adapters arrive in later tickets; until then those run on fakes.
   core = createApp({
     dataDir: app.getPath('userData'),
