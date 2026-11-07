@@ -62,17 +62,28 @@ Facts established: CAMeL provides `diac`, `lex`, `caphi`, `gloss`, `pos`, `root`
 
 ## Installer size (researched)
 
-Verified: CAMeL's MSA data is small: `morphology-db-msa-r13` 40.5 MB plus `disambig-mle-calima-msa-r13` 88.7 MB (both GPL v2), about 129 MB together. `camel_data -i light` installs only the morphology and MLE disambiguation data. The large packages (AraBERT NER and sentiment 541.6 MB each, mBERT 712.5 MB, dialect ID 282.3 MB) are not needed and are excluded.
+Verified: CAMeL's MSA data is small: `morphology-db-msa-r13` 40.5 MB plus `disambig-mle-calima-msa-r13` 88.7 MB (both GPL v2), 129.2 MB together on disk. Install these two packages directly, **not** `camel_data -i light`: `light` also pulls every dialect database and MLE model plus the dialect-ID model (536 MB on disk). The large packages (AraBERT NER and sentiment 541.6 MB each, mBERT 712.5 MB) are not needed either.
 
-Verified: `camel-tools` hard-requires `torch>=2.0`, `transformers>=4.44.0`, `scikit-learn`, `scipy`, `pandas` and `numpy>=2.0` in `setup.py`, even though morphology plus MLE disambiguation does not obviously need torch/transformers. A normal pip install would therefore bundle torch (likely several hundred MB; unmeasured).
+Verified (spike #2, `scripts/spikes/camel-no-torch/`): `camel-tools` 1.6.0 declares `torch`, `transformers`, `scikit-learn`, `scipy`, `pandas` and `numpy` as hard requirements, but morphology plus MLE disambiguation **runs on Windows without any of them**. Install `camel-tools` with `--no-deps`, then only `cachetools`, `editdistance`, `emoji`, `regex`, `six`, `pyrsistent`, `tqdm`, `requests` and `muddler`. No vendoring needed. The wheels avoided total about 208 MB compressed (torch alone 126.7 MB).
 
-Estimate, unmeasured: Electron shell about 100-150 MB; embedded Python plus numpy/pandas/scipy/sklearn a few hundred MB; dictionary SQLite (Wiktionary extract, Tatoeba) tens to low hundreds of MB. Total is dominated by torch, if included.
+Measured, Python helper (embeddable Python 3.13 + packages above + MSA data):
 
-Mitigation options, to be tested in a spike: (a) install `camel-tools` with `--no-deps` and only the needed dependencies, checking that the morphology and MLE disambiguator import without torch/transformers; (b) vendor those modules; (c) accept a large installer. Option (a) is the first thing to try.
+| Part | On disk |
+|---|---|
+| Embeddable Python runtime | 21.2 MB |
+| site-packages | 9.2 MB |
+| MSA data | 129.2 MB |
+| **Helper total** | **159.7 MB** (23.8 MB zipped) |
+
+Startup: about 2 s to import and 4 s to load the MLE model; disambiguating a sentence then takes milliseconds. So the helper runs as one long-lived process per app run, not one spawn per Utterance.
+
+Packaging (decided by spike #2): ship the official Windows embeddable Python with a `site-packages` folder (camel-tools `--no-deps`, pinned) and a data folder holding only the two MSA packages, located through `CAMELTOOLS_DATA`. Electron spawns it as the sidecar. A build script fetches all three; the spike's `smoke.py`, which fails if any heavy package is imported, guards every camel-tools upgrade.
+
+Estimate, unmeasured: Electron shell about 100-150 MB; dictionary SQLite (Wiktionary extract, Tatoeba) tens to low hundreds of MB. With the 160 MB helper, the installed app is likely 300-450 MB, with no torch.
 
 ## Open questions
 
-1. ~~Lemmatization~~ Resolved: CAMeL Tools Python sidecar. Remaining: sidecar packaging size, startup time, and how the Electron/Tauri shell supervises it.
+1. ~~Lemmatization~~ Resolved: CAMeL Tools Python sidecar. Packaging size and startup time measured (see Installer size). Remaining: how the Electron shell supervises it.
 2. ~~Ambiguity~~ Resolved: context disambiguation. Remaining: does a wrong pick need a correction UI later?
 3. **Dictionary source** (plan proposed above; remaining: verify gloss quality on real audio, and confirm the Wiktionary extract's licence and size once built). Findings: CAMeL's default MSA database (calima-msa-r13, about 40 MB, derived from MADAMIRA's almor-msa-r13) is **GPL v2**; Qutrub (verb conjugation) is **GPL**; Wiktionary-derived data (via kaikki.org, English-Wiktionary edition) is *probably* CC BY-SA, unverified; Tatoeba is CC BY 2.0 (about 31k Arabic-English pairs). Unverified: calima gloss/root fields, kaikki Arabic file size/licence, Arabic WordNet. Distribution implications of GPL/share-alike need a licensing decision (item 10). Original note: which open Arabic→English data (Wiktionary dumps, Tatoeba for examples, others) and how is it bundled offline?
 4. ~~Audio source / OS~~ Resolved: Windows, Electron, desktop audio transcribed, optional separate mic track. Replay plays both tracks (Desktop Track and Mic Track, when a Mic Track exists), kept as separate files and played in sync. Remaining: per-track volume/mute controls in Replay View?

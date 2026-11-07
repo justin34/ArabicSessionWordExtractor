@@ -1,0 +1,11 @@
+# Runtime deps for CAMeL morphology + MLE disambiguation, without torch/transformers.
+# Install camel-tools itself separately with --no-deps (see README.md).
+cachetools>=6.0.0
+editdistance
+emoji
+muddler
+pyrsistent
+regex
+requests
+six
+tqdm
