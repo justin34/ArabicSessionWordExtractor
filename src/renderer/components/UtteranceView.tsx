@@ -1,14 +1,20 @@
 import type { LiveUtterance } from '../bridge';
 import './UtteranceView.css';
 
+function ArabicText({ text }: { text: string }) {
+  return (
+    <p className="utterance__arabic" dir="rtl" lang="ar">
+      {text}
+    </p>
+  );
+}
+
 /** One Utterance: muted Arabic while interim, word columns plus translation once final. */
 export function UtteranceView({ utterance }: { utterance: LiveUtterance }) {
   if (!utterance.isFinal) {
     return (
       <article className="utterance utterance--interim" data-state="interim">
-        <p className="utterance__interim-text" dir="rtl" lang="ar">
-          {utterance.text}
-        </p>
+        <ArabicText text={utterance.text} />
       </article>
     );
   }
@@ -28,9 +34,7 @@ export function UtteranceView({ utterance }: { utterance: LiveUtterance }) {
           ))}
         </div>
       ) : (
-        <p className="utterance__interim-text" dir="rtl" lang="ar">
-          {utterance.text}
-        </p>
+        <ArabicText text={utterance.text} />
       )}
       {utterance.translation && (
         <p className="utterance__translation" dir="ltr">

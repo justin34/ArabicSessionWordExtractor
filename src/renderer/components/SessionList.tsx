@@ -1,6 +1,9 @@
 import type { ListedSession } from '../bridge';
 import { formatStart, sessionDuration } from '../format';
+import { Badge } from './Badge';
 import { EmptyState } from './EmptyState';
+import { ScreenHeader } from './ScreenHeader';
+import { sessionKey } from '../sessionKey';
 import './SessionList.css';
 
 export function SessionList({
@@ -21,24 +24,21 @@ export function SessionList({
 }) {
   return (
     <>
-      <div className="screen__header">
-        <h1>Sessions</h1>
-        <div className="screen__actions">
-          {onStartDemo && (
-            <button type="button" className="btn" onClick={onStartDemo}>
-              Start Demo Session
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={onStart}
-            disabled={startDisabled}
-          >
-            Start Session
+      <ScreenHeader title="Sessions">
+        {onStartDemo && (
+          <button type="button" className="btn" onClick={onStartDemo}>
+            Start Demo Session
           </button>
-        </div>
-      </div>
+        )}
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={onStart}
+          disabled={startDisabled}
+        >
+          Start Session
+        </button>
+      </ScreenHeader>
       {sessions.length === 0 ? (
         <EmptyState title="No sessions yet">
           Start a Session to listen to a class or video and see the transcript live.
@@ -46,7 +46,7 @@ export function SessionList({
       ) : (
         <ul className="session-list" aria-label="Session list">
           {sessions.map((s) => (
-            <li key={s.isDemo ? `demo-${s.id}` : s.id}>
+            <li key={sessionKey(s)}>
               <button
                 type="button"
                 className="session-row"
@@ -55,10 +55,8 @@ export function SessionList({
               >
                 <span className="session-row__start">{formatStart(s.startedAt)}</span>
                 <span className="session-row__duration">{sessionDuration(s, now)}</span>
-                {s.isDemo && <span className="badge badge--demo">Demo</span>}
-                <span className={`badge badge--${s.status}`}>
-                  {s.status === 'recording' ? 'Recording' : 'Completed'}
-                </span>
+                {s.isDemo && <Badge kind="demo">Demo</Badge>}
+                <Badge kind={s.status}>{s.status === 'recording' ? 'Recording' : 'Completed'}</Badge>
               </button>
             </li>
           ))}

@@ -53,3 +53,7 @@ export const scriptedDemoFeed: DemoFeed = (onUpdate) => {
 
   return () => timers.forEach(clearTimeout);
 };
+
+/** Demo Sessions are developer tooling: offered by the dev server, never by a built app. */
+export const demoFeedForBuild = (isDev: boolean): DemoFeed | undefined =>
+  isDev ? scriptedDemoFeed : undefined;

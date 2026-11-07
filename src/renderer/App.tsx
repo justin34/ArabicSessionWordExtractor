@@ -13,8 +13,10 @@ import { EmptyState } from './components/EmptyState';
 import { LiveView } from './components/LiveView';
 import { ReplayPlaceholder } from './components/ReplayPlaceholder';
 import { SessionList } from './components/SessionList';
+import { ScreenHeader } from './components/ScreenHeader';
 import { Sidebar, type Destination } from './components/Sidebar';
 import { StartPanel } from './components/StartPanel';
+import { isDemoKey, sessionKey } from './sessionKey';
 import { applyUpdate } from './transcript';
 import { useNow } from './useNow';
 import './App.css';
@@ -38,8 +40,6 @@ interface ActiveRecording {
   writes: Promise<void>;
   writeError: Error | null;
 }
-
-const keyOf = (s: ListedSession) => (s.isDemo ? `demo-${s.id}` : String(s.id));
 
 function sortNewestFirst(list: ListedSession[]): ListedSession[] {
   return [...list].sort(
@@ -77,7 +77,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
   // Live transcript for a real Session being viewed.
   const liveKey = route.name === 'live' ? route.sessionKey : null;
   useEffect(() => {
-    if (liveKey === null || liveKey.startsWith('demo-')) return;
+    if (liveKey === null || isDemoKey(liveKey)) return;
     return bridge.subscribeTranscript(Number(liveKey), (u) => pushUpdate(liveKey, u));
   }, [bridge, liveKey, pushUpdate]);
 
@@ -194,15 +194,15 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
     setDemoSessions((list) => [...list, demo]);
     demoCancels.current.set(
       id,
-      demoFeed((u) => pushUpdate(keyOf(demo), u)),
+      demoFeed((u) => pushUpdate(sessionKey(demo), u)),
     );
-    setRoute({ name: 'live', sessionKey: keyOf(demo) });
+    setRoute({ name: 'live', sessionKey: sessionKey(demo) });
   }
 
-  function open(s: ListedSession): void {
+  function openSession(s: ListedSession): void {
     setRoute(
       s.status === 'recording'
-        ? { name: 'live', sessionKey: keyOf(s) }
+        ? { name: 'live', sessionKey: sessionKey(s) }
         : { name: 'replay', session: s },
     );
   }
@@ -211,11 +211,11 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
   const sidebarActive: Destination =
     route.name === 'live' || route.name === 'replay' ? 'sessions' : route.name;
   const liveSession =
-    route.name === 'live' ? sessions.find((s) => keyOf(s) === route.sessionKey) : undefined;
-  const recorderLevel = active.current?.capture;
+    route.name === 'live' ? sessions.find((s) => sessionKey(s) === route.sessionKey) : undefined;
+  const audioCapture = active.current?.capture;
   const getLevel = useCallback(
-    () => (recorderLevel ? recorderLevel.level() : 0),
-    [recorderLevel],
+    () => (audioCapture ? audioCapture.level() : 0),
+    [audioCapture],
   );
 
   return (
@@ -234,7 +234,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
           <SessionList
             sessions={sessions}
             now={now}
-            onOpen={open}
+            onOpen={openSession}
             onStart={() => setStartPanelOpen(true)}
             startDisabled={activeId !== null}
             onStartDemo={demoFeed ? startDemo : undefined}
@@ -253,7 +253,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
         {route.name === 'replay' && <ReplayPlaceholder onBack={goSessions} />}
         {route.name === 'vocabulary' && (
           <>
-            <h1>Vocabulary</h1>
+            <ScreenHeader title="Vocabulary" />
             <EmptyState title="Vocabulary is coming soon">
               Every word you hear will collect here.
             </EmptyState>
@@ -261,7 +261,7 @@ export function App({ bridge, capture, demoFeed }: AppProps) {
         )}
         {route.name === 'settings' && (
           <>
-            <h1>Settings</h1>
+            <ScreenHeader title="Settings" />
             <EmptyState title="Settings are coming soon">
               API keys and preferences will live here.
             </EmptyState>

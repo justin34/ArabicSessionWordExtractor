@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ListedSession, LiveUtterance } from '../bridge';
 import { sessionDuration } from '../format';
+import { Badge } from './Badge';
 import { EmptyState } from './EmptyState';
 import { UtteranceView } from './UtteranceView';
 import './LiveView.css';
@@ -66,7 +67,7 @@ export function LiveView({
       </button>
       <header className="live__header">
         <h1>Live View</h1>
-        {session.isDemo && <span className="badge badge--demo">Demo</span>}
+        {session.isDemo && <Badge kind="demo">Demo</Badge>}
         <span className="live__timer">{sessionDuration(session, now)}</span>
         {getLevel && <LevelMeter getLevel={getLevel} />}
         <button type="button" className="btn btn--danger" onClick={onStop}>

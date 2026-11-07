@@ -1,0 +1,18 @@
+.badge {
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  background: var(--color-surface-muted);
+}
+.badge--recording {
+  background: var(--color-danger-bg);
+  color: var(--color-recording);
+}
+.badge--completed {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+.badge--demo {
+  background: var(--color-demo-bg);
+  color: var(--color-demo);
+}
