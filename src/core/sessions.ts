@@ -1,6 +1,6 @@
 import { appendFileSync, createReadStream, mkdirSync, writeFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
-import { alignToTokens, cleanSurface, isWord } from './analysis/align';
+import { alignToTokens, cleanSurface, hasArabicWord, isArabicWord, isWord } from './analysis/align';
 import { AudioChannel } from './audioChannel';
 import { quickGloss } from './dictionary/gloss';
 import type { StudyGuideHooks } from './guides/studyGuides';
@@ -169,6 +169,8 @@ export class Sessions {
           heardAt: new Date().toISOString(),
           current: final,
         };
+        // An Utterance of Foreign words only stays in the Transcript, untranslated and unanalyzed.
+        if (!hasArabicWord(event.text)) continue;
         // Neither holds up the next Utterance's speech-to-text.
         for (const work of [this.translate(utterance), this.analyze(utterance)]) {
           const followUp = work.finally(() => live.followUps.delete(followUp));
@@ -210,16 +212,25 @@ export class Sessions {
    */
   private async analyze(u: FinalUtterance): Promise<void> {
     try {
-      const analyses = (await this.providers.arabicAnalyzer.analyze(u.current.text)).filter((a) =>
+      const analyzed = (await this.providers.arabicAnalyzer.analyze(u.current.text)).filter((a) =>
         isWord(a.surface),
       );
-      if (analyses.length === 0) return;
       const tokens = u.current.tokens;
-      const positions = alignToTokens(analyses, tokens);
-      const words: HeardWord[] = analyses.map((analysis, i) => ({
+      const aligned = alignToTokens(analyzed, tokens);
+      // Foreign words never enter the Vocabulary. A word is judged by the whole Token it
+      // came from, so an Arabic prefix on a Latin word (الiPhone) is left out too.
+      const kept = analyzed.flatMap((analysis, i) => {
+        const p = aligned[i];
+        const arabic = isArabicWord(analysis.surface) && (p === null || isArabicWord(tokens[p].surface));
+        return arabic ? [{ analysis, position: p }] : [];
+      });
+      if (kept.length === 0) return;
+      const analyses = kept.map((k) => k.analysis);
+      const positions = kept.map((k) => k.position);
+      const words: HeardWord[] = kept.map(({ analysis, position }) => ({
         surface: cleanSurface(analysis.surface),
         analysis,
-        tokenPosition: positions[i],
+        tokenPosition: position,
       }));
       const lemmaIds = this.store.recordHeardWords(u.utteranceId, u.heardAt, words);
       // Lemmas new to the Vocabulary get their Word Card alongside the glosses.

@@ -1,3 +1,4 @@
+import { isArabicWord } from '../../core/analysis/align';
 import type { LiveUtterance } from '../bridge';
 import './UtteranceView.css';
 
@@ -11,8 +12,8 @@ function ArabicText({ text }: { text: string }) {
 
 /**
  * One Utterance: muted Arabic while interim; once final, word columns with their glosses
- * (plain Arabic until glosses exist) plus the sentence translation. Each word column opens
- * the word panel when clicked.
+ * (plain Arabic until glosses exist) plus the sentence translation. Each Arabic word column
+ * opens the word panel when clicked; a Foreign word shows as heard, with no gloss or click.
  */
 export function UtteranceView({
   utterance,
@@ -37,7 +38,7 @@ export function UtteranceView({
         <div className="utterance__words" dir="rtl">
           {utterance.tokens.map((t, i) => (
             <span key={i} className={i === selectedWord ? 'word word--selected' : 'word'} role="group">
-              {onSelectWord ? (
+              {onSelectWord && isArabicWord(t.surface) ? (
                 <button
                   type="button"
                   className="word__ar word__button"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alignToTokens, cleanSurface, isWord } from '../../src/core/analysis/align';
+import { alignToTokens, cleanSurface, hasArabicWord, isArabicWord, isWord } from '../../src/core/analysis/align';
 import type { TokenAnalysis } from '../../src/core/providers';
 import type { Token } from '../../src/core/types';
 
@@ -50,5 +50,28 @@ describe('Surface forms', () => {
     expect(isWord('كتب')).toBe(true);
     expect(isWord('٢٠٢٦')).toBe(false);
     expect(isWord('.')).toBe(false);
+  });
+});
+
+describe('Arabic words and Foreign words', () => {
+  it('takes a word of Arabic letters, with or without diacritics, hamza forms, ة, ى, tatweel or punctuation', () => {
+    for (const w of ['كتب', 'كَتَبُوا', 'أإآؤئءٱ', 'مدرسة', 'على', 'جميـــل', '«الدرس».', '٣ساعات']) {
+      expect(isArabicWord(w), w).toBe(true);
+    }
+  });
+
+  it('calls any word with a Latin or non-Arabic letter a Foreign word, mixed words included', () => {
+    for (const w of ['okay', 'Zoom', 'الiPhone', 'بالـGPS', 'پیام', 'گوگل', 'ڤيروس', 'چای']) {
+      expect(isArabicWord(w), w).toBe(false);
+    }
+  });
+
+  it('is not a word without letters', () => {
+    for (const w of ['', '123', '٣', '،', 'ـــ']) expect(isArabicWord(w), w).toBe(false);
+  });
+
+  it('a sentence has an Arabic word unless all its words are Foreign words', () => {
+    expect(hasArabicWord('Okay, can everyone hear me?')).toBe(false);
+    expect(hasArabicWord('Okay, مرحبا')).toBe(true);
   });
 });

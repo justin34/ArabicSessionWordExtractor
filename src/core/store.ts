@@ -572,6 +572,93 @@ export class Store {
     };
   }
 
+  /**
+   * Takes Foreign words (GLOSSARY) back out of the Vocabulary, for data stored before they
+   * were kept out: their Tokens lose Lemma and gloss, their occurrences and surface forms go,
+   * and so does every Lemma left foreign or unheard, with its Word Card and its place in
+   * stored Session Guides. The rest of each guide stays as generated. Returns the Lemma ids
+   * removed.
+   */
+  removeForeignWords(isArabic: (word: string) => boolean): number[] {
+    const foreign = <T>(rows: T[], word: (r: T) => string) => rows.filter((r) => !isArabic(word(r)));
+    this.db.exec('BEGIN');
+    try {
+      const tokens = foreign(
+        this.db
+          .prepare("SELECT utterance_id, position, surface FROM tokens WHERE lemma_id IS NOT NULL OR gloss <> ''")
+          .all() as Array<{ utterance_id: number; position: number; surface: string }>,
+        (r) => r.surface,
+      );
+      const clearToken = this.db.prepare(
+        "UPDATE tokens SET lemma_id = NULL, gloss = '' WHERE utterance_id = ? AND position = ?",
+      );
+      for (const t of tokens) clearToken.run(t.utterance_id, t.position);
+
+      const occurrences = foreign(
+        this.db.prepare('SELECT id, surface FROM occurrences').all() as Array<{ id: number; surface: string }>,
+        (r) => r.surface,
+      );
+      const deleteOccurrence = this.db.prepare('DELETE FROM occurrences WHERE id = ?');
+      for (const o of occurrences) deleteOccurrence.run(o.id);
+
+      const forms = foreign(
+        this.db.prepare('SELECT lemma_id, surface FROM surface_forms').all() as Array<{
+          lemma_id: number;
+          surface: string;
+        }>,
+        (r) => r.surface,
+      );
+      const deleteForm = this.db.prepare('DELETE FROM surface_forms WHERE lemma_id = ? AND surface = ?');
+      for (const f of forms) deleteForm.run(f.lemma_id, f.surface);
+
+      const lemmas = this.db
+        .prepare(
+          `SELECT id, lemma, NOT EXISTS (SELECT 1 FROM occurrences o WHERE o.lemma_id = l.id) AS unheard
+           FROM lemmas l`,
+        )
+        .all() as Array<{ id: number; lemma: string; unheard: number }>;
+      const removed = lemmas.filter((l) => l.unheard || !isArabic(l.lemma)).map((l) => l.id);
+      if (removed.length === 0) {
+        this.db.exec('COMMIT');
+        return [];
+      }
+      for (const sql of [
+        "UPDATE tokens SET lemma_id = NULL, gloss = '' WHERE lemma_id = ?",
+        'DELETE FROM occurrences WHERE lemma_id = ?',
+        'DELETE FROM surface_forms WHERE lemma_id = ?',
+        'DELETE FROM word_cards WHERE lemma_id = ?',
+        'DELETE FROM lemmas WHERE id = ?',
+      ]) {
+        const statement = this.db.prepare(sql);
+        for (const id of removed) statement.run(id);
+      }
+
+      const gone = new Set(removed);
+      const guides = this.db.prepare('SELECT session_id, lemmas_heard, groups FROM session_guides').all() as Array<{
+        session_id: number;
+        lemmas_heard: number;
+        groups: string;
+      }>;
+      const updateGuide = this.db.prepare(
+        'UPDATE session_guides SET lemmas_heard = ?, groups = ? WHERE session_id = ?',
+      );
+      for (const g of guides) {
+        const groups = JSON.parse(g.groups) as SessionGuide['groups'];
+        const kept = groups
+          .map((group) => ({ ...group, words: group.words.filter((w) => !gone.has(w.lemmaId)) }))
+          .filter((group) => group.words.length > 0);
+        const heard = this.sessionLemmaIds(g.session_id).length;
+        const json = JSON.stringify(kept);
+        if (heard !== g.lemmas_heard || json !== JSON.stringify(groups)) updateGuide.run(heard, json, g.session_id);
+      }
+      this.db.exec('COMMIT');
+      return removed;
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
   /** Completed Sessions with no Session Guide, e.g. ended by a crash, oldest first. */
   completedSessionsWithoutGuide(): number[] {
     return (

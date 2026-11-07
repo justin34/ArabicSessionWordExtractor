@@ -11,6 +11,28 @@ export function isWord(surface: string): boolean {
   return /\p{L}/u.test(surface);
 }
 
+/**
+ * The Arabic alphabet: the 28 letters, the hamza forms (ء أ إ آ ؤ ئ ٱ), ة and ى, plus
+ * tatweel. Persian and Urdu letters (پ چ ژ گ ڤ) are not in it.
+ */
+const ARABIC_LETTER = /^[ء-غـ-يٱ]$/u;
+
+/**
+ * True when a word is Arabic: it has a letter, and every letter is Arabic. Diacritics,
+ * digits and punctuation are ignored. Anything else is a Foreign word (GLOSSARY), which
+ * stays in the Transcript but never enters the Vocabulary.
+ */
+export function isArabicWord(surface: string): boolean {
+  const found = surface.normalize('NFC').match(/\p{L}/gu);
+  if (!found || found.every((c) => c === 'ـ')) return false;
+  return found.every((c) => ARABIC_LETTER.test(c));
+}
+
+/** True when a sentence has at least one Arabic word. */
+export function hasArabicWord(text: string): boolean {
+  return text.split(/\s+/u).some(isArabicWord);
+}
+
 /** The surface form as heard, without the punctuation speech-to-text attaches to it. */
 export function cleanSurface(surface: string): string {
   return surface.normalize('NFC').replace(/[^\p{L}\p{M}\p{N}]/gu, '');

@@ -98,6 +98,18 @@ describe('Click-a-word panel', () => {
     expect(within(sections[3]).getByRole('listitem').textContent).toBe('7 Nov 2026, 10:00 · heard 3 times');
   });
 
+  it('shows a Foreign word as heard, with no gloss and no button', async () => {
+    const user = userEvent.setup();
+    const demo = new ManualDemoFeed();
+    renderApp({ bridge: new FakeBridge(), demo });
+    await user.click(await screen.findByRole('button', { name: 'Start Demo Session' }));
+    act(() => demo.emit(final('u1', [['افتحوا', 'open', 7], ['Zoom', '', null]])));
+
+    expect(screen.getByRole('button', { name: 'Show details for افتحوا' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show details for Zoom' })).toBeNull();
+    expect(screen.getByText('Zoom')).toBeTruthy();
+  });
+
   it('marks the word whose panel is open, and switches when another is clicked', async () => {
     const { user, bridge } = await liveViewWith();
     const first = screen.getByRole('button', { name: 'Show details for كتبوا' });

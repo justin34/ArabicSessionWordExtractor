@@ -704,6 +704,100 @@ describe('Word Cards and Session Guides', () => {
   });
 });
 
+describe('Foreign words', () => {
+  function final(text: string, startMs: number): SttEvent {
+    const words = text.split(' ').map((w, i) => ({ text: w, startMs: startMs + i * 500, endMs: startMs + i * 500 + 400 }));
+    return { type: 'final', text, startMs, endMs: words.at(-1)!.endMs, words };
+  }
+  /** Like the CAMeL helper: an unknown word is its own Lemma; الiPhone splits in two. */
+  const analyzer: ArabicAnalyzer = {
+    analyze: async (sentence) =>
+      sentence
+        .split(' ')
+        .map((w) => w.replace(/[\p{P}\p{S}]/gu, ''))
+        .flatMap((w) => (w === 'الiPhone' ? ['ال', 'iPhone'] : [w]))
+        .map((w) => ({ surface: w, lemma: w, partOfSpeech: 'noun', stemGloss: w })),
+  };
+  const mixed = final('افتحوا Zoom الآن الiPhone', 0);
+  const english = final('Okay, can everyone hear me?', 3000);
+
+  it('stay in the Transcript as heard, with no Lemma or gloss, and never enter the Vocabulary', async () => {
+    const translated: string[] = [];
+    const translator: Translator = {
+      translate: async (t) => {
+        translated.push(t);
+        return 'Open Zoom now';
+      },
+    };
+    const core = open(
+      fakeProviders({ speechToText: new FakeSpeechToText([mixed, english]), arabicAnalyzer: analyzer, translator }),
+    );
+
+    const s = await core.sessions.processRecording(recordedFile([1]));
+    await core.guides.idle();
+
+    const transcript = core.sessions.transcript(s.id);
+    expect(transcript.map((u) => u.text)).toEqual([mixed.text, english.text]);
+    expect(transcript[0].tokens.map((t) => [t.surface, t.lemmaId !== null, t.gloss !== ''])).toEqual([
+      ['افتحوا', true, true],
+      ['Zoom', false, false],
+      ['الآن', true, true],
+      ['الiPhone', false, false],
+    ]);
+    expect(core.vocabulary.list().map((e) => e.lemma).sort()).toEqual(['افتحوا', 'الآن'].sort());
+    const guide = core.guides.sessionGuide(s.id)!;
+    expect(guide.groups.flatMap((g) => g.words.map((w) => w.lemma)).sort()).toEqual(['افتحوا', 'الآن'].sort());
+    expect(guide.lemmasHeard).toBe(2);
+    // An Utterance with no Arabic word is neither translated nor analyzed.
+    expect(translated).toEqual([mixed.text]);
+    expect(transcript[1]).toMatchObject({ translation: '' });
+    expect(transcript[1].tokens.every((t) => t.lemmaId === null && t.gloss === '')).toBe(true);
+  });
+
+  it('stored before they were kept out leave the Vocabulary, Word Cards and Session Guides when the app opens', async () => {
+    // Record with today's pipeline, then put a Foreign word back in as older builds stored it.
+    open(fakeProviders({ speechToText: new FakeSpeechToText([mixed]), arabicAnalyzer: analyzer }));
+    const s = await app!.sessions.processRecording(recordedFile([1]));
+    await app!.guides.idle();
+    const arabicIds = app!.vocabulary.list().map((e) => e.lemmaId);
+    const guide = app!.guides.sessionGuide(s.id)!;
+    const utteranceId = app!.sessions.transcript(s.id)[0].id;
+    app?.close();
+    const db = new DatabaseSync(join(dir, 'app.db'));
+    const at = guide.generatedAt;
+    const zoom = db
+      .prepare("INSERT INTO lemmas (lemma, part_of_speech, first_heard_at) VALUES ('Zoom', 'noun', ?) RETURNING id")
+      .get(at) as { id: number };
+    db.prepare("INSERT INTO surface_forms (lemma_id, surface, first_heard_at, seq) VALUES (?, 'Zoom', ?, 0)").run(zoom.id, at);
+    db.prepare("INSERT INTO occurrences (lemma_id, utterance_id, position, surface) VALUES (?, ?, 99, 'Zoom')").run(
+      zoom.id,
+      utteranceId,
+    );
+    db.prepare("UPDATE tokens SET lemma_id = ?, gloss = 'Zoom' WHERE utterance_id = ? AND position = 1").run(
+      zoom.id,
+      utteranceId,
+    );
+    db.prepare("INSERT INTO word_cards (lemma_id, generated_at, updated_at, sections) VALUES (?, 'x', 'x', '[]')").run(zoom.id);
+    const zoomWord = { lemmaId: zoom.id, lemma: 'Zoom', gloss: 'Zoom', partOfSpeech: 'noun', count: 1 };
+    const groups = guide.groups.map((g, i) => (i === 0 ? { ...g, words: [...g.words, zoomWord] } : g));
+    db.prepare('UPDATE session_guides SET lemmas_heard = ?, groups = ? WHERE session_id = ?').run(
+      guide.lemmasHeard + 1,
+      JSON.stringify(groups),
+      s.id,
+    );
+    db.close();
+
+    const core = open(fakeProviders({ arabicAnalyzer: analyzer }));
+    await core.guides.idle();
+
+    expect(core.vocabulary.list().map((e) => e.lemmaId).sort()).toEqual([...arabicIds].sort());
+    expect(core.guides.wordCard(zoom.id)).toBeUndefined();
+    expect(core.guides.sessionGuide(s.id)).toEqual(guide);
+    expect(core.sessions.transcript(s.id)[0].tokens[1]).toMatchObject({ surface: 'Zoom', lemmaId: null, gloss: '' });
+    for (const id of arabicIds) expect(core.guides.wordCard(id)).toBeDefined();
+  });
+});
+
 describe('Session list', () => {
   it('lists newest Session first and survives an app restart', async () => {
     const first = open().sessions;
