@@ -117,8 +117,24 @@
   font-size: var(--text-sm);
   font-weight: 600;
 }
-.utterance--learner .utterance__arabic {
+.utterance--learner .utterance__arabic,
+.utterance--learner .word:not(.word--current) .word__ar {
   color: var(--color-learner);
+}
+.utterance--learner.utterance--current {
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+/* The "You" label sits on its own line above the words; the seek time floats beside it. */
+.utterance__words--learner {
+  margin-block-start: var(--space-2);
+}
+.utterance--learner .word:hover {
+  background: none;
+}
+.utterance--learner .word--current,
+.utterance--learner .word--current:hover {
+  background: var(--color-learner);
+  color: var(--color-learner-bg);
 }
 .utterance--learner.utterance--interim .utterance__arabic {
   color: var(--color-interim);

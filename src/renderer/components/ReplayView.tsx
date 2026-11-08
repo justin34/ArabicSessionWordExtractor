@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LiveUtterance, Utterance } from '../bridge';
 import { formatDuration } from '../format';
-import { replayPosition } from '../replay';
-import { useLoaded } from '../useLoaded';
+import { replayPosition, type ReplayPosition } from '../replay';
+import type { Loaded } from '../useLoaded';
 import { EmptyState } from './EmptyState';
 import { UtteranceView } from './UtteranceView';
 import { WordPanel, type LoadWordDetails } from './WordPanel';
@@ -11,39 +11,57 @@ import './ReplayView.css';
 
 /** A stored Utterance in the shape the word-by-word view draws. */
 function asShown(u: Utterance): LiveUtterance {
-  return { id: String(u.id), isFinal: true, text: u.text, translation: u.translation, tokens: u.tokens };
+  return {
+    id: String(u.id),
+    isFinal: true,
+    text: u.text,
+    translation: u.translation,
+    tokens: u.tokens,
+    ...(u.track === 'mic' ? { track: u.track } : {}),
+  };
 }
+
+/**
+ * Which Utterances Replay draws: the teacher's and the learner's interleaved by start
+ * (`all`, Together), the teacher's alone (`teacher`), or Learner Utterances alone (`learner`, My Speech).
+ */
+export type ReplayShows = 'all' | 'teacher' | 'learner';
 
 /** How far the Mic Track may drift from the Desktop Track before it is moved back in step. */
 const MAX_MIC_DRIFT_S = 0.25;
 
 /**
  * Replay of a completed Session: plays its Desktop Track, and its Mic Track in sync when it
- * has one, while its Transcript, drawn as in
- * Live View, highlights the sentence and word being heard. Clicking a sentence seeks to it;
- * clicking a word opens the word panel.
+ * has one, while its Transcript, drawn as in Live View, highlights the sentence and word
+ * being heard on each Track, so a learner talking over the teacher lights one of each.
+ * Clicking a sentence seeks to it; clicking a teacher's word opens the word panel.
+ * Changing what it `shows` changes only what is drawn, never what is playing.
  */
 export function ReplayView({
-  sessionId,
+  transcript,
+  shows,
   audioUrl,
   micAudioUrl,
   fallbackDurationMs,
-  loadTranscript,
   loadWordDetails,
 }: {
-  sessionId: number;
+  transcript: Loaded<Utterance[]>;
+  shows: ReplayShows;
   audioUrl: string;
   /** The Mic Track, when the Session has one. The Desktop Track leads; the Mic Track follows it. */
   micAudioUrl?: string;
   /** Length shown until the audio reports its own (a recording may not carry one). */
   fallbackDurationMs: number;
-  loadTranscript: (sessionId: number) => Promise<Utterance[]>;
   loadWordDetails: LoadWordDetails;
 }) {
-  const load = useCallback(() => loadTranscript(sessionId), [loadTranscript, sessionId]);
-  const transcript = useLoaded(load);
-  // Replay shows the teacher's Transcript; Learner Utterances join it with Together · Separate (#43).
-  const utterances = transcript.state === 'loaded' ? transcript.value.filter((u) => u.track !== 'mic') : [];
+  const all = transcript.state === 'loaded' ? transcript.value : [];
+  const teacher = all.filter((u) => u.track !== 'mic');
+  const learner = all.filter((u) => u.track === 'mic');
+  let utterances: Utterance[];
+  if (shows === 'teacher') utterances = teacher;
+  else if (shows === 'learner') utterances = learner;
+  // Interleaved by start time, as in Live View; a stable sort keeps each Track's own order.
+  else utterances = [...all].sort((a, b) => a.startMs - b.startMs);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const micRef = useRef<HTMLAudioElement>(null);
@@ -102,18 +120,28 @@ export function ReplayView({
     else audio.pause();
   }
 
-  const position = replayPosition(utterances, positionMs);
-  const currentId = position ? utterances[position.utterance].id : null;
+  // Each Track has its own current Utterance and Token: the two can overlap.
+  const lit = new Map<number, number | null>();
+  const light = (track: Utterance[], position: ReplayPosition | null) => {
+    if (position) lit.set(track[position.utterance].id, position.token);
+  };
+  light(teacher, replayPosition(teacher, positionMs));
+  light(learner, replayPosition(learner, positionMs));
+  // The one kept in view: the teacher's, unless only the learner's is drawn or lit.
+  const currentId = utterances.find((u) => lit.has(u.id) && u.track !== 'mic')?.id
+    ?? utterances.find((u) => lit.has(u.id))?.id
+    ?? null;
 
   // Keep the sentence being heard in view while it plays.
   const currentRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (playing) currentRef.current?.scrollIntoView?.({ block: 'nearest' });
-  }, [currentId, playing]);
+  }, [currentId, playing, shows]);
 
   const [selected, setSelected] = useState<{ utteranceId: number; position: number } | null>(null);
+  // The panel belongs to a teacher's word, so it closes when My Speech is drawn instead.
   const selectedToken = selected
-    ? utterances.find((u) => u.id === selected.utteranceId)?.tokens[selected.position]
+    ? utterances.find((u) => u.id === selected.utteranceId && u.track !== 'mic')?.tokens[selected.position]
     : undefined;
   const closePanel = useCallback(() => setSelected(null), []);
 
@@ -122,17 +150,22 @@ export function ReplayView({
   else if (transcript.state === 'failed')
     body = <EmptyState title="Could not load the Transcript">{transcript.message}</EmptyState>;
   else if (utterances.length === 0)
-    body = <EmptyState title="No Transcript">Nothing was transcribed in this Session.</EmptyState>;
+    body =
+      shows === 'teacher' && learner.length > 0 ? (
+        <EmptyState title="No Transcript">Only your own speech was transcribed in this Session.</EmptyState>
+      ) : (
+        <EmptyState title="No Transcript">Nothing was transcribed in this Session.</EmptyState>
+      );
   else
-    body = utterances.map((u, i) => (
+    body = utterances.map((u) => (
       <div key={u.id} ref={u.id === currentId ? currentRef : undefined}>
         <UtteranceView
           utterance={asShown(u)}
           selectedWord={selected?.utteranceId === u.id ? selected.position : null}
-          onSelectWord={(p) => setSelected({ utteranceId: u.id, position: p })}
+          onSelectWord={u.track === 'mic' ? undefined : (p) => setSelected({ utteranceId: u.id, position: p })}
           replay={{
-            current: position?.utterance === i,
-            currentWord: position?.utterance === i ? position.token : null,
+            current: lit.has(u.id),
+            currentWord: lit.get(u.id) ?? null,
             time: formatDuration(u.startMs),
             onSeek: () => seek(u.startMs, true),
           }}

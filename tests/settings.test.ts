@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseAudioSettings, Settings } from '../src/core/settings';
+import { isReplayLayout, parseAudioSettings, Settings } from '../src/core/settings';
 
 let dir: string;
 let path: string;
@@ -50,5 +50,23 @@ describe('Audio settings', () => {
     expect(parseAudioSettings(null)).toBeUndefined();
     expect(parseAudioSettings({ desktopSource: { deviceId: '', label: 'x' } })).toBeUndefined();
     expect(parseAudioSettings({ microphone: { deviceId: 'a', label: 'x'.repeat(501) } })).toBeUndefined();
+  });
+});
+
+describe('Replay layout', () => {
+  it('is Together until chosen, then kept in settings.json across app runs beside other settings', () => {
+    expect(new Settings(path).replayLayout()).toBe('together');
+    new Settings(path).setAudio({ desktopSource: stereoMix, microphone: null });
+    new Settings(path).setReplayLayout('separate');
+
+    expect(new Settings(path).replayLayout()).toBe('separate');
+    expect(new Settings(path).audio().desktopSource).toEqual(stereoMix);
+  });
+
+  it('falls back to Together when the stored value is not one', () => {
+    writeFileSync(path, JSON.stringify({ replayLayout: 'sideways' }));
+    expect(new Settings(path).replayLayout()).toBe('together');
+    expect(isReplayLayout('separate')).toBe(true);
+    expect(isReplayLayout('sideways')).toBe(false);
   });
 });

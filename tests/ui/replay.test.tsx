@@ -283,3 +283,129 @@ describe('Replay with a Mic Track', () => {
   });
 });
 
+
+describe('Learner Utterances in Replay (Together · Separate)', () => {
+  /** The learner talks over the teacher's second sentence (2:00-3:50). */
+  const mine: Utterance = {
+    id: 20,
+    sessionId: 1,
+    text: 'أنا طالب',
+    translation: 'I am a student.',
+    startMs: 2500,
+    endMs: 3500,
+    tokens: [
+      { surface: 'أنا', gloss: '', lemmaId: null, startMs: 2500, endMs: 2900 },
+      { surface: 'طالب', gloss: '', lemmaId: null, startMs: 3000, endMs: 3400 },
+    ],
+    track: 'mic',
+  };
+
+  async function openWithLearner(layout: 'together' | 'separate' = 'together') {
+    const bridge = new FakeBridge([session({ id: 1, micTrackPath: 'session-1-mic.webm' })]);
+    // Stored by Track, as the store returns them: the learner's after the teacher's.
+    bridge.transcripts.set(1, [...transcript, mine]);
+    bridge.details.set(3, kataba);
+    bridge.layout = layout;
+    const user = userEvent.setup();
+    const view = renderApp({ bridge });
+    await user.click(await screen.findByRole('button', { name: /open session/i }));
+    await screen.findByText('Welcome');
+    const desktop = view.container.querySelector<HTMLAudioElement>('audio[data-track="desktop"]')!;
+    const mic = view.container.querySelector<HTMLAudioElement>('audio[data-track="mic"]')!;
+    return { user, bridge, desktop, player: fakePlayer(desktop), micPlayer: fakePlayer(mic) };
+  }
+
+  const layoutSwitch = () => screen.queryByRole('radiogroup', { name: 'Show my speech' });
+  const tabs = () => screen.getAllByRole('tab').map((t) => t.textContent);
+  const shownText = () => sentences().map((s) => s.querySelector('.utterance__translation')?.textContent);
+  const lit = () => sentences().filter((s) => s.getAttribute('aria-current') === 'true').map((s) => s.querySelector('.utterance__translation')?.textContent);
+
+  it('offers no switch for a Session without Learner Utterances', async () => {
+    await openReplay();
+    expect(layoutSwitch()).toBeNull();
+    expect(tabs()).toEqual(['Replay', 'Session Guide']);
+  });
+
+  it('Together (the default) interleaves them with the teacher by start, marked "You" and unglossed', async () => {
+    const { user, player } = await openWithLearner();
+
+    const choice = within(layoutSwitch()!);
+    expect(choice.getByRole('radio', { name: 'Together' }).getAttribute('aria-checked')).toBe('true');
+    expect(tabs()).toEqual(['Replay', 'Session Guide']);
+    expect(shownText()).toEqual(['Welcome', 'They wrote the lesson.', 'I am a student.', undefined]);
+
+    const learnerSentence = sentences()[2];
+    expect(learnerSentence.getAttribute('data-track')).toBe('mic');
+    expect(within(learnerSentence).getByText('You')).toBeTruthy();
+    expect(learnerSentence.querySelector('.word__gloss')).toBeNull();
+    // Its words open nothing; its sentence and start time seek there and play.
+    expect(within(learnerSentence).queryByRole('button', { name: /Show details/ })).toBeNull();
+    await user.click(within(learnerSentence).getByText('طالب'));
+    expect(player.time).toBe(2.5);
+    expect(screen.queryByRole('complementary', { name: 'Word details' })).toBeNull();
+    player.reach(0);
+    await user.click(within(learnerSentence).getByRole('button', { name: 'Play from 0:02' }));
+    expect(player.time).toBe(2.5);
+  });
+
+  it('lights one Utterance and one word per Track when the learner talks over the teacher', async () => {
+    const { player } = await openWithLearner();
+
+    player.reach(3100);
+    expect(lit()).toEqual(['They wrote the lesson.', 'I am a student.']);
+    expect(currentWord()).toEqual(['iPhone', 'طالب']);
+
+    player.reach(3600);
+    expect(lit()).toEqual([]);
+  });
+
+  it('Separate gives My Speech its own tab, and the choice is saved for every Session', async () => {
+    const { user, bridge } = await openWithLearner();
+
+    await user.click(screen.getByRole('radio', { name: 'Separate' }));
+    expect(bridge.savedLayouts).toEqual(['separate']);
+    expect(tabs()).toEqual(['Replay', 'My Speech', 'Session Guide']);
+    expect(shownText()).toEqual(['Welcome', 'They wrote the lesson.', undefined]);
+
+    await user.click(screen.getByRole('tab', { name: 'My Speech' }));
+    expect(screen.getByRole('tabpanel', { name: 'My Speech' })).toBeTruthy();
+    expect(shownText()).toEqual(['I am a student.']);
+
+    // Back to Together while on My Speech shows everything on Replay.
+    await user.click(screen.getByRole('radio', { name: 'Together' }));
+    expect(bridge.savedLayouts).toEqual(['separate', 'together']);
+    expect(tabs()).toEqual(['Replay', 'Session Guide']);
+    expect(screen.getByRole('tab', { name: 'Replay' }).getAttribute('aria-selected')).toBe('true');
+    expect(sentences()).toHaveLength(4);
+  });
+
+  it('opens Separate when that was chosen before (it survives a restart)', async () => {
+    await openWithLearner('separate');
+    expect(within(layoutSwitch()!).getByRole('radio', { name: 'Separate' }).getAttribute('aria-checked')).toBe('true');
+    expect(tabs()).toEqual(['Replay', 'My Speech', 'Session Guide']);
+  });
+
+  it('keeps one player going across Replay, My Speech and the Session Guide', async () => {
+    const { user, desktop, player, micPlayer } = await openWithLearner('separate');
+    await user.click(screen.getByRole('button', { name: 'Play' }));
+
+    await user.click(screen.getByRole('tab', { name: 'My Speech' }));
+    expect(desktop.pause).not.toHaveBeenCalled();
+    player.reach(3100);
+    expect(lit()).toEqual(['I am a student.']);
+    expect(currentWord()).toEqual(['طالب']);
+
+    await user.click(screen.getByRole('tab', { name: 'Session Guide' }));
+    await user.click(screen.getByRole('tab', { name: 'Replay' }));
+    expect(desktop.pause).not.toHaveBeenCalled();
+    expect(desktop.isConnected).toBe(true);
+    expect(lit()).toEqual(['They wrote the lesson.']);
+    expect(currentWord()).toEqual(['iPhone']);
+
+    // Seeking from My Speech moves both Tracks.
+    await user.click(screen.getByRole('tab', { name: 'My Speech' }));
+    await user.click(screen.getByRole('button', { name: 'Play from 0:02' }));
+    expect(player.time).toBe(2.5);
+    expect(micPlayer.time).toBe(2.5);
+  });
+});

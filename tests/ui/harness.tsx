@@ -17,6 +17,7 @@ import {
   type DesktopAudioCapture,
   type LiveUtterance,
   type MicAudioCapture,
+  type ReplayLayout,
   type Track,
 } from '../../src/renderer/bridge';
 import type { BundleProblem, ReadyUpdate } from '../../src/core/types';
@@ -58,6 +59,9 @@ export class FakeBridge implements Bridge {
   audio: AudioSettings = { desktopSource: null, microphone: null };
   savedAudio: AudioSettings[] = [];
   saveAudioError: Error | null = null;
+  /** The stored Replay layout (settings.json); each save is recorded. */
+  layout: ReplayLayout = 'together';
+  savedLayouts: ReplayLayout[] = [];
   /** Stored API keys by name (the fake keeps them; the real bridge never returns them). */
   keys = new Map<ApiKeyName, string>();
   /** Keys set only by the environment. */
@@ -160,6 +164,14 @@ export class FakeBridge implements Bridge {
     this.savedAudio.push(settings);
     this.audio = settings;
     return settings;
+  }
+  async replayLayout() {
+    return this.layout;
+  }
+  async saveReplayLayout(layout: ReplayLayout) {
+    this.savedLayouts.push(layout);
+    this.layout = layout;
+    return layout;
   }
   async apiKeys(): Promise<ApiKeyStatus[]> {
     if (this.apiKeysError) throw this.apiKeysError;

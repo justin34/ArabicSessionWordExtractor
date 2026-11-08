@@ -1,8 +1,15 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import type { ApiKeyName, AudioDevice, AudioSettings } from './types';
+import type { ApiKeyName, AudioDevice, AudioSettings, ReplayLayout } from './types';
 
 /** The system's own choices: all system audio (loopback) transcribed, the default microphone. */
 export const DEFAULT_AUDIO_SETTINGS: AudioSettings = { desktopSource: null, microphone: null };
+
+/** Learner Utterances are interleaved with the teacher's until the learner chooses otherwise. */
+export const DEFAULT_REPLAY_LAYOUT: ReplayLayout = 'together';
+
+export function isReplayLayout(value: unknown): value is ReplayLayout {
+  return value === 'together' || value === 'separate';
+}
 
 /** The API keys the settings screen holds, in the order it shows them. */
 export const API_KEY_NAMES: readonly ApiKeyName[] = ['soniox', 'deepgram', 'googleTranslate'];
@@ -78,6 +85,17 @@ export class Settings {
   setAudio(settings: AudioSettings): AudioSettings {
     this.write({ ...this.read(), audio: settings });
     return settings;
+  }
+
+  /** How Replay shows Learner Utterances, for every Session; Together until chosen. */
+  replayLayout(): ReplayLayout {
+    const stored = this.read().replayLayout;
+    return isReplayLayout(stored) ? stored : DEFAULT_REPLAY_LAYOUT;
+  }
+
+  setReplayLayout(layout: ReplayLayout): ReplayLayout {
+    this.write({ ...this.read(), replayLayout: layout });
+    return layout;
   }
 
   /** A stored API key; undefined when none is stored or it cannot be read back. */
