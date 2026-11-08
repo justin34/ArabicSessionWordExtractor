@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  ApiKeyName,
+  ApiKeyStatus,
   AudioCapture,
   AudioInputs,
   AudioSettings,
@@ -13,6 +15,7 @@ import type {
   VocabularyEntry,
 } from './bridge';
 import { DeviceUnavailableError, NoDesktopAudioError } from './bridge';
+import { CreditsView } from './components/CreditsView';
 import { LiveView } from './components/LiveView';
 import { ReplayPlaceholder } from './components/ReplayPlaceholder';
 import { SessionList } from './components/SessionList';
@@ -78,6 +81,10 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
   const [startPanelOpen, setStartPanelOpen] = useState(false);
   /** The devices the next Session records from, loaded when the Start panel opens. */
   const [startDevices, setStartDevices] = useState<AudioSettings | null>(null);
+  /** Which API keys are set, loaded when the Start panel opens so it can warn about missing ones. */
+  const [startKeys, setStartKeys] = useState<ApiKeyStatus[] | null>(null);
+  /** Why speech-to-text stopped, by Session key; its audio keeps recording. */
+  const [transcriptionFailures, setTranscriptionFailures] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [vocabulary, setVocabulary] = useState<VocabularyEntry[] | null>(null);
@@ -101,20 +108,44 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
     setTranscripts((t) => ({ ...t, [key]: applyUpdate(t[key] ?? [], u) }));
   }, []);
 
+  /**
+   * Follows a real Session's live Transcript, and whether its speech-to-text has stopped.
+   * A failure can come before the subscription (no key fails at once), so it is also asked for.
+   */
+  const follow = useCallback(
+    (sessionId: number): Unsubscribe => {
+      const key = String(sessionId);
+      let current = true;
+      const fail = (message: string) =>
+        current && setTranscriptionFailures((f) => (f[key] === message ? f : { ...f, [key]: message }));
+      const offUpdates = bridge.subscribeTranscript(sessionId, (u) => pushUpdate(key, u));
+      const offFailures = bridge.subscribeTranscriptionFailure(sessionId, fail);
+      bridge
+        .transcriptionFailure(sessionId)
+        .then((message) => message && fail(message))
+        .catch(() => undefined);
+      return () => {
+        current = false;
+        offUpdates();
+        offFailures();
+      };
+    },
+    [bridge, pushUpdate],
+  );
+
   // Live transcript of the Session this window is recording, kept while the learner
   // looks elsewhere so Live View is complete on return.
   useEffect(() => {
     if (activeId === null) return;
-    const key = String(activeId);
-    return bridge.subscribeTranscript(activeId, (u) => pushUpdate(key, u));
-  }, [bridge, activeId, pushUpdate]);
+    return follow(activeId);
+  }, [activeId, follow]);
 
   // Any other real Session being viewed live.
   const liveKey = route.name === 'live' ? route.sessionKey : null;
   useEffect(() => {
     if (liveKey === null || isDemoKey(liveKey) || liveKey === String(activeId)) return;
-    return bridge.subscribeTranscript(Number(liveKey), (u) => pushUpdate(liveKey, u));
-  }, [bridge, liveKey, activeId, pushUpdate]);
+    return follow(Number(liveKey));
+  }, [liveKey, activeId, follow]);
 
   // The Vocabulary grows while Sessions record, so reload it each time it is opened.
   const onVocabulary = route.name === 'vocabulary';
@@ -279,7 +310,10 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
 
   function openStartPanel(): void {
     setStartDevices(null);
+    setStartKeys(null);
     setStartPanelOpen(true);
+    // Without the key list the panel simply shows no key warnings.
+    bridge.apiKeys().then(setStartKeys).catch(() => undefined);
     bridge
       .audioSettings()
       .then(setStartDevices)
@@ -305,6 +339,10 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
   const loadAudioSettings = useCallback(() => bridge.audioSettings(), [bridge]);
   const saveAudioSettings = useCallback((s: AudioSettings) => bridge.saveAudioSettings(s), [bridge]);
   const listAudioInputs = useCallback(() => audioInputs.list(), [audioInputs]);
+  const loadApiKeys = useCallback(() => bridge.apiKeys(), [bridge]);
+  const saveApiKey = useCallback((name: ApiKeyName, key: string | null) => bridge.saveApiKey(name, key), [bridge]);
+  const checkApiKey = useCallback((name: ApiKeyName) => bridge.checkApiKey(name), [bridge]);
+  const loadDictionaryNotice = useCallback(() => bridge.dictionaryNotice(), [bridge]);
   const openWordCard = (lemmaId: number) => setRoute({ name: 'word-card', lemmaId, back: route });
 
   return (
@@ -335,6 +373,7 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
             now={now}
             utterances={transcripts[route.sessionKey] ?? []}
             getLevel={liveSession.isDemo ? undefined : getLevel}
+            transcriptionFailure={transcriptionFailures[route.sessionKey]}
             onStop={() => void stopSession(liveSession)}
             onBack={goSessions}
             loadWordDetails={loadWordDetails}
@@ -378,13 +417,24 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
             loadSettings={loadAudioSettings}
             saveSettings={saveAudioSettings}
             listDevices={listAudioInputs}
+            loadKeys={loadApiKeys}
+            saveKey={saveApiKey}
+            checkKey={checkApiKey}
           />
         )}
+        {route.name === 'credits' && <CreditsView loadDictionaryNotice={loadDictionaryNotice} />}
       </main>
       {startPanelOpen && (
         <StartPanel
           devices={startDevices}
-          onStart={(options) => void startRecording(options)} onCancel={() => setStartPanelOpen(false)} />
+          keys={startKeys}
+          onOpenSettings={() => {
+            setStartPanelOpen(false);
+            setRoute({ name: 'settings' });
+          }}
+          onStart={(options) => void startRecording(options)}
+          onCancel={() => setStartPanelOpen(false)}
+        />
       )}
     </div>
   );

@@ -1,11 +1,12 @@
 import './Sidebar.css';
 
-export type Destination = 'sessions' | 'vocabulary' | 'settings';
+export type Destination = 'sessions' | 'vocabulary' | 'settings' | 'credits';
 
 const ITEMS: Array<{ id: Destination; label: string }> = [
   { id: 'sessions', label: 'Sessions' },
   { id: 'vocabulary', label: 'Vocabulary' },
   { id: 'settings', label: 'Settings' },
+  { id: 'credits', label: 'Credits' },
 ];
 
 export function Sidebar({

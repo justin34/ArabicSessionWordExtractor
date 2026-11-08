@@ -39,3 +39,41 @@
 .settings__status--error {
   color: var(--color-danger);
 }
+.settings__intro {
+  margin-bottom: var(--space-4);
+}
+.settings__key-row {
+  display: flex;
+  gap: var(--space-2);
+  margin-block-start: var(--space-1);
+}
+.settings__key-row input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+.settings__key-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block-start: var(--space-2);
+}
+.settings__key .settings__status {
+  margin: var(--space-1) 0 0;
+}
+.settings__status--pending {
+  color: var(--color-text-muted);
+}
+.settings__warning {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-1);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: var(--text-sm);
+}

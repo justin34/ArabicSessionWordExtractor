@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AudioDevice, AudioSettings } from '../bridge';
+import { ApiKeysSection, type CheckKey, type LoadKeys, type SaveKey } from './ApiKeysSection';
 import { ScreenHeader } from './ScreenHeader';
 import './SettingsView.css';
 
@@ -15,17 +16,23 @@ function options(devices: AudioDevice[], saved: AudioDevice | null): Array<{ val
 }
 
 /**
- * Settings: which audio devices Sessions record from. Each choice is saved as soon as it
- * is made. API keys are to join it with #13.
+ * Settings: which audio devices Sessions record from, each choice saved as soon as it is
+ * made, and the services' API keys.
  */
 export function SettingsView({
   loadSettings,
   saveSettings,
   listDevices,
+  loadKeys,
+  saveKey,
+  checkKey,
 }: {
   loadSettings: () => Promise<AudioSettings>;
   saveSettings: (settings: AudioSettings) => Promise<AudioSettings>;
   listDevices: () => Promise<AudioDevice[]>;
+  loadKeys: LoadKeys;
+  saveKey: SaveKey;
+  checkKey: CheckKey;
 }) {
   const [settings, setSettings] = useState<AudioSettings | null>(null);
   const [devices, setDevices] = useState<AudioDevice[]>([]);
@@ -126,10 +133,7 @@ export function SettingsView({
             </p>
           )}
         </section>
-        <section className="settings__section" aria-labelledby="settings-keys">
-          <h2 id="settings-keys">API keys</h2>
-          <p className="settings__note">API keys and other preferences are coming soon.</p>
-        </section>
+        <ApiKeysSection loadKeys={loadKeys} saveKey={saveKey} checkKey={checkKey} />
       </div>
     </>
   );

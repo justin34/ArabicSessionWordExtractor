@@ -26,7 +26,7 @@ describe('App shell', () => {
 
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeTruthy();
-    expect(screen.getByText(/coming soon/i)).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'API keys' })).toBeTruthy();
     expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe('Settings');
   });
 });

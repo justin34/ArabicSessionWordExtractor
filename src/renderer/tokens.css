@@ -21,6 +21,8 @@
   --color-accent-contrast: #ffffff;
   --color-danger: #b3261e;
   --color-danger-bg: #fbe9e7;
+  --color-warning: #7a4b00;
+  --color-warning-bg: #fdf1d8;
   --color-recording: #c62828;
   --color-success: #2e6b3a;
   --color-success-bg: #e4f1e6;
@@ -71,6 +73,8 @@
     --color-accent-contrast: #0e1f1a;
     --color-danger: #f2a49d;
     --color-danger-bg: #3b1d1b;
+    --color-warning: #f0c674;
+    --color-warning-bg: #3a2e14;
     --color-recording: #ef6a6a;
     --color-success: #8fd19b;
     --color-success-bg: #1d3023;
