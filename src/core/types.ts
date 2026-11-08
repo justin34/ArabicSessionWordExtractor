@@ -99,6 +99,12 @@ export interface AudioSettings {
   microphone: AudioDevice | null;
 }
 
+/**
+ * How a completed Session's Replay shows Learner Utterances: interleaved with the
+ * teacher's (`together`), or on their own My Speech tab (`separate`).
+ */
+export type ReplayLayout = 'together' | 'separate';
+
 /** The services the app needs an API key for: speech-to-text (Soniox, else Deepgram) and translation. */
 export type ApiKeyName = 'soniox' | 'deepgram' | 'googleTranslate';
 

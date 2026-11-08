@@ -13,6 +13,7 @@ import type {
   MicAudioCapture,
   LiveUtterance,
   ReadyUpdate,
+  ReplayLayout,
   Track,
   Unsubscribe,
   VocabularyEntry,
@@ -98,6 +99,8 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
   /** What a packaged build is missing (GLOSSARY: Installer); told until it is reinstalled. */
   const [bundleProblems, setBundleProblems] = useState<BundleProblem[]>([]);
   const [readyUpdate, setReadyUpdate] = useState<ReadyUpdate | null>(null);
+  /** How Replay shows Learner Utterances, for every Session (settings.json). */
+  const [replayLayout, setReplayLayout] = useState<ReplayLayout>('together');
   const active = useRef<ActiveRecording | null>(null);
   const starting = useRef(false);
   const demoCancels = useRef(new Map<number, Unsubscribe>());
@@ -123,6 +126,25 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
       current = false;
     };
   }, [bridge]);
+
+  useEffect(() => {
+    let current = true;
+    bridge
+      .replayLayout()
+      .then((layout) => current && setReplayLayout(layout))
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [bridge]);
+
+  /** Applies at once; saved for every Session afterwards. */
+  function changeReplayLayout(layout: ReplayLayout): void {
+    setReplayLayout(layout);
+    bridge
+      .saveReplayLayout(layout)
+      .catch((err: Error) => setNotice(`Could not save the Replay choice: ${err.message}`));
+  }
 
   // An update can finish downloading before or after the window opens.
   useEffect(() => {
@@ -463,6 +485,8 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
               session={route.session}
               tab={route.tab}
               onTabChange={(tab) => setRoute({ ...route, tab })}
+              layout={replayLayout}
+              onLayoutChange={changeReplayLayout}
               audioUrl={bridge.desktopTrackUrl(route.session.id)}
               micAudioUrl={route.session.micTrackPath ? bridge.micTrackUrl(route.session.id) : undefined}
               loadTranscript={loadTranscript}

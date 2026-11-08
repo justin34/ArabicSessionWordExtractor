@@ -8,7 +8,7 @@ import { audioFileResponse } from '../core/audioFile';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
 import { readDetailModuleConfig } from '../core/details/wordDetails';
 import { KeyedSpeechToText, KeyedTranslator } from '../core/apiKeys';
-import { isApiKeyName, parseApiKey, parseAudioSettings, type SecretCodec } from '../core/settings';
+import { isApiKeyName, isReplayLayout, parseApiKey, parseAudioSettings, type SecretCodec } from '../core/settings';
 import { SqliteDictionary } from '../core/dictionary/sqlite';
 import type { ArabicAnalyzer, Dictionary } from '../core/providers';
 import { DEV_DATA_FOLDER } from '../core/appIdentity';
@@ -247,6 +247,11 @@ function registerIpc({ sessions, vocabulary, words, guides, anki, settings, apiK
     const audio = parseAudioSettings(value);
     if (!audio) throw new Error('Invalid audio settings');
     return settings.setAudio(audio);
+  });
+  ipcMain.handle('settings:replayLayout', () => settings.replayLayout());
+  ipcMain.handle('settings:setReplayLayout', (_event, value: unknown) => {
+    if (!isReplayLayout(value)) throw new Error('Invalid Replay layout');
+    return settings.setReplayLayout(value);
   });
   ipcMain.handle(
     'guides:sessionGuide',

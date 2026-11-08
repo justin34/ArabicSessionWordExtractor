@@ -2,8 +2,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, cleanup, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { LiveUtterance, Track, Utterance } from '../../src/renderer/bridge';
-import { FakeBridge, renderApp, session } from './harness';
+import type { LiveUtterance } from '../../src/renderer/bridge';
+import { FakeBridge, renderApp } from './harness';
 
 /** "Also transcribe my speech" and Learner Utterances in Live View (GLOSSARY; ADR 0004). */
 
@@ -97,29 +97,6 @@ describe('Also transcribe my speech', () => {
     await user.click(screen.getByRole('button', { name: 'Start' }));
     await screen.findByRole('button', { name: 'Stop' });
     expect(bridge.startOptions[1]).toEqual({ mic: true });
-  });
-});
-
-describe('Learner Utterances in Replay', () => {
-  it('are left out until Replay offers Together and Separate (#43)', async () => {
-    const bridge = new FakeBridge([session({ id: 1, micTrackPath: 'session-1-mic.webm' })]);
-    const stored = (id: number, text: string, translation: string, track: Track): Utterance => ({
-      id,
-      sessionId: 1,
-      text,
-      translation,
-      startMs: id * 1000,
-      endMs: id * 1000 + 500,
-      tokens: words(text, id * 1000),
-      track,
-    });
-    bridge.transcripts.set(1, [stored(1, 'مرحبا', 'Welcome', 'desktop'), stored(2, 'أهلا', 'Hello from me', 'mic')]);
-    const user = userEvent.setup();
-    renderApp({ bridge });
-    await user.click(await screen.findByRole('button', { name: /open session/i }));
-
-    expect(await screen.findByText('Welcome')).toBeTruthy();
-    expect(screen.queryByText('Hello from me')).toBeNull();
   });
 });
 

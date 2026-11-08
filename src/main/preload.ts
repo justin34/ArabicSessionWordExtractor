@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('api', {
   sessionGuide: (sessionId: number) => ipcRenderer.invoke('guides:sessionGuide', sessionId),
   audioSettings: () => ipcRenderer.invoke('settings:audio'),
   saveAudioSettings: (settings: unknown) => ipcRenderer.invoke('settings:setAudio', settings),
+  replayLayout: () => ipcRenderer.invoke('settings:replayLayout'),
+  saveReplayLayout: (layout: string) => ipcRenderer.invoke('settings:setReplayLayout', layout),
   apiKeys: () => ipcRenderer.invoke('settings:apiKeys'),
   saveApiKey: (name: string, key: string | null) => ipcRenderer.invoke('settings:setApiKey', name, key),
   checkApiKey: (name: string) => ipcRenderer.invoke('settings:checkApiKey', name),

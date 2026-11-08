@@ -9,6 +9,7 @@ import type {
   BundleProblem,
   LiveUtterance,
   ReadyUpdate,
+  ReplayLayout,
   Session,
   SessionGuide,
   Track,
@@ -18,7 +19,7 @@ import type {
   WordDetails,
 } from '../core/types';
 
-export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, BundleProblem, LiveUtterance, ReadyUpdate, SessionGuide, Track, Utterance, VocabularyEntry, WordCard, WordDetails };
+export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, BundleProblem, LiveUtterance, ReadyUpdate, ReplayLayout, SessionGuide, Track, Utterance, VocabularyEntry, WordCard, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -54,6 +55,9 @@ export interface Bridge {
   /** Which audio devices Sessions record from, as stored. */
   audioSettings(): Promise<AudioSettings>;
   saveAudioSettings(settings: AudioSettings): Promise<AudioSettings>;
+  /** How Replay shows Learner Utterances, as stored for every Session. */
+  replayLayout(): Promise<ReplayLayout>;
+  saveReplayLayout(layout: ReplayLayout): Promise<ReplayLayout>;
   /** Whether each API key is set, and where from; never the keys themselves. */
   apiKeys(): Promise<ApiKeyStatus[]>;
   /** Stores a key entered in Settings, or removes it with null; rejects one that cannot be a key. */
