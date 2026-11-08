@@ -1,7 +1,7 @@
 {
   "name": "arabic-session-word-extractor",
   "productName": "Arabic Session Word Extractor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Listens to spoken Arabic, shows a live transcript with English glosses, and builds a vocabulary",
   "author": "Jabril Hall",
