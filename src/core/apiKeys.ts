@@ -1,6 +1,7 @@
-import type { SpeechToText, SttEvent, Translator } from './providers';
+import type { RecordedAudio, RecordedSpeechToText, SpeechToText, SttEvent, SttWord, Translator } from './providers';
 import { API_KEY_NAMES, type Settings } from './settings';
 import { DeepgramSpeechToText } from './stt/deepgram';
+import { DeepgramRecordedSpeechToText, SonioxRecordedSpeechToText } from './stt/recorded';
 import { SonioxSpeechToText } from './stt/soniox';
 import { GoogleTranslator } from './translation/google';
 import type { ApiKeyCheck, ApiKeyName, ApiKeyStatus } from './types';
@@ -28,6 +29,8 @@ const GET_A_KEY: Record<ApiKeyName, string> = {
 
 export const NO_TRANSCRIPTION_KEY =
   'No speech-to-text key: audio is recorded without a Transcript. Add a Soniox or Deepgram key in Settings.';
+export const NO_RECORDING_TRANSCRIPTION_KEY =
+  'No speech-to-text key: add a Soniox or Deepgram key in Settings, then try again.';
 export const NO_TRANSLATION_KEY =
   'No Google Cloud Translation key: sentences are not translated. Add one in Settings.';
 
@@ -183,6 +186,28 @@ export class KeyedSpeechToText implements SpeechToText {
     const deepgram = this.keys.get('deepgram');
     if (deepgram) return this.make.deepgram(deepgram).transcribe(audio);
     return failing(new MissingKeyError(NO_TRANSCRIPTION_KEY));
+  }
+}
+
+/**
+ * Speech-to-text for a recording, with the key in use when it starts: Soniox's async API
+ * first, Deepgram's pre-recorded API as the fallback. Without either, it fails at once.
+ */
+export class KeyedRecordedSpeechToText implements RecordedSpeechToText {
+  constructor(
+    private readonly keys: Pick<ApiKeys, 'get'>,
+    private readonly make = {
+      soniox: (apiKey: string): RecordedSpeechToText => new SonioxRecordedSpeechToText({ apiKey }),
+      deepgram: (apiKey: string): RecordedSpeechToText => new DeepgramRecordedSpeechToText({ apiKey }),
+    },
+  ) {}
+
+  async transcribeFile(audio: RecordedAudio): Promise<SttWord[]> {
+    const soniox = this.keys.get('soniox');
+    if (soniox) return this.make.soniox(soniox).transcribeFile(audio);
+    const deepgram = this.keys.get('deepgram');
+    if (deepgram) return this.make.deepgram(deepgram).transcribeFile(audio);
+    throw new MissingKeyError(NO_RECORDING_TRANSCRIPTION_KEY);
   }
 }
 

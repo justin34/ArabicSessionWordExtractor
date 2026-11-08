@@ -6,6 +6,7 @@ import { ApiKeys, type ApiKeysOptions } from './apiKeys';
 import { WordDetailsBuilder, type DetailModuleConfig } from './details/wordDetails';
 import { StudyGuides } from './guides/studyGuides';
 import type { Providers } from './providers';
+import { MicTranscriptions } from './micTranscription';
 import { Sessions } from './sessions';
 import { Settings, type SecretCodec } from './settings';
 import { Store } from './store';
@@ -40,6 +41,8 @@ export interface Anki {
 
 export interface App {
   sessions: Sessions;
+  /** "Transcribe my microphone" for completed Sessions, in the background. */
+  micTranscriptions: MicTranscriptions;
   vocabulary: Vocabulary;
   words: Words;
   guides: Guides;
@@ -87,9 +90,11 @@ export function createApp({
   store.removeForeignWords(isArabicWord);
   const builder = new WordDetailsBuilder(store, { store, dictionary: providers.dictionary }, detailModules);
   const studyGuides = new StudyGuides(store, builder);
-  const sessions = new Sessions(store, providers, join(dataDir, 'recordings'), studyGuides, {
+  const recordingsDir = join(dataDir, 'recordings');
+  const sessions = new Sessions(store, providers, recordingsDir, studyGuides, {
     translationWaitMs,
   });
+  const micTranscriptions = new MicTranscriptions(store, providers, recordingsDir);
   // Sessions a crash ended, and data from before study guides, get theirs now.
   studyGuides.catchUp();
   const vocabulary: Vocabulary = { list: () => store.listVocabulary() };
@@ -108,5 +113,5 @@ export function createApp({
     studyGuides.stop();
     store.close();
   };
-  return { sessions, vocabulary, words, guides, anki, settings, apiKeys, close };
+  return { sessions, micTranscriptions, vocabulary, words, guides, anki, settings, apiKeys, close };
 }

@@ -17,6 +17,8 @@ import {
   type DesktopAudioCapture,
   type LiveUtterance,
   type MicAudioCapture,
+  type MicRecordingGate,
+  type MicTranscriptionStatus,
   type ReplayLayout,
   type StartOptions,
   type Track,
@@ -90,6 +92,12 @@ export class FakeBridge implements Bridge {
   update: ReadyUpdate | null = null;
   restarts = 0;
   restartError: Error | null = null;
+  /** "Transcribe my microphone": each start asked for, what the main process reports, and the gated copy sent. */
+  micTranscriptionStarts: Array<{ sessionId: number; gated: boolean }> = [];
+  micTranscriptionStatuses = new Map<number, MicTranscriptionStatus>();
+  micTranscriptionError: Error | null = null;
+  gatedMicRecordings = new Map<number, Uint8Array[]>();
+  private micTranscriptionListeners = new Set<(sessionId: number, status: MicTranscriptionStatus) => void>();
   private updateListeners = new Set<(update: ReadyUpdate) => void>();
   private listeners = new Map<number, (u: LiveUtterance) => void>();
   private failureListeners = new Map<number, (message: string, track: Track) => void>();
@@ -124,6 +132,32 @@ export class FakeBridge implements Bridge {
   }
   async appendGatedMicAudio(sessionId: number, chunk: Uint8Array) {
     this.gatedMicChunks.push({ sessionId, chunk });
+  }
+  async micTranscription(sessionId: number) {
+    return this.micTranscriptionStatuses.get(sessionId) ?? null;
+  }
+  async beginGatedMicRecording(sessionId: number) {
+    this.gatedMicRecordings.set(sessionId, []);
+  }
+  async appendGatedMicRecording(sessionId: number, chunk: Uint8Array) {
+    this.gatedMicRecordings.get(sessionId)!.push(chunk);
+  }
+  async transcribeMicTrack(sessionId: number, options?: { gated?: boolean }) {
+    if (this.micTranscriptionError) throw this.micTranscriptionError;
+    this.micTranscriptionStarts.push({ sessionId, gated: options?.gated === true });
+    const status: MicTranscriptionStatus = { state: 'running', note: 'Transcribing your speech… you can leave this screen.' };
+    this.micTranscriptionStatuses.set(sessionId, status);
+    return status;
+  }
+  subscribeMicTranscriptions(onStatus: (sessionId: number, status: MicTranscriptionStatus) => void) {
+    this.micTranscriptionListeners.add(onStatus);
+    return () => void this.micTranscriptionListeners.delete(onStatus);
+  }
+  /** Plays the main process reporting on a Session's "Transcribe my microphone" job. */
+  reportMicTranscription(sessionId: number, status: MicTranscriptionStatus) {
+    if (status.state === 'done') this.micTranscriptionStatuses.delete(sessionId);
+    else this.micTranscriptionStatuses.set(sessionId, status);
+    for (const l of this.micTranscriptionListeners) l(sessionId, status);
   }
   async stopSession(sessionId: number) {
     this.calls.push(`stop:${sessionId}`);
@@ -291,6 +325,18 @@ export class FakeCapture implements DesktopAudioCapture, MicAudioCapture {
   }
 }
 
+/** Gates a stored Mic Track; records each call and returns `chunks`. */
+export class FakeMicRecordingGate implements MicRecordingGate {
+  calls: Array<{ url: string; threshold: number }> = [];
+  chunks: Uint8Array[] = [new Uint8Array([1, 2]), new Uint8Array([3])];
+  error: Error | null = null;
+  async gate(url: string, threshold: number) {
+    this.calls.push({ url, threshold });
+    if (this.error) throw this.error;
+    return this.chunks;
+  }
+}
+
 /** A fixed list of audio inputs. */
 export class FakeAudioInputs implements AudioInputs {
   constructor(public devices: AudioDevice[] = []) {}
@@ -320,14 +366,23 @@ export function renderApp(
     mic?: FakeCapture;
     inputs?: FakeAudioInputs;
     demo?: ManualDemoFeed;
+    micGate?: FakeMicRecordingGate;
   } = {},
 ) {
   const bridge = opts.bridge ?? new FakeBridge();
   const capture = opts.capture ?? new FakeCapture();
   const mic = opts.mic ?? new FakeCapture();
   const inputs = opts.inputs ?? new FakeAudioInputs();
+  const micGate = opts.micGate ?? new FakeMicRecordingGate();
   const view = render(
-    <App bridge={bridge} capture={capture} micCapture={mic} audioInputs={inputs} demoFeed={opts.demo?.feed} />,
+    <App
+      bridge={bridge}
+      capture={capture}
+      micCapture={mic}
+      audioInputs={inputs}
+      micRecordingGate={micGate}
+      demoFeed={opts.demo?.feed}
+    />,
   );
-  return { bridge, capture, mic, inputs, ...view };
+  return { bridge, capture, mic, inputs, micGate, ...view };
 }

@@ -8,6 +8,7 @@ import type {
   AudioSettings,
   BundleProblem,
   LiveUtterance,
+  MicTranscriptionStatus,
   ReadyUpdate,
   ReplayLayout,
   Session,
@@ -19,7 +20,7 @@ import type {
   WordDetails,
 } from '../core/types';
 
-export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, BundleProblem, LiveUtterance, ReadyUpdate, ReplayLayout, SessionGuide, Track, Utterance, VocabularyEntry, WordCard, WordDetails };
+export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, BundleProblem, LiveUtterance, MicTranscriptionStatus, ReadyUpdate, ReplayLayout, SessionGuide, Track, Utterance, VocabularyEntry, WordCard, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -47,6 +48,18 @@ export interface Bridge {
   /** Sends mic audio gated by the mic threshold to speech-to-text; never recorded. */
   appendGatedMicAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
   stopSession(sessionId: number): Promise<Session>;
+  /** Where "Transcribe my microphone" stands for a completed Session: running, or why it failed; null otherwise. */
+  micTranscription(sessionId: number): Promise<MicTranscriptionStatus | null>;
+  /** Starts a new copy of the Mic Track gated by the mic threshold (WAV), sent in chunks before `transcribeMicTrack`. */
+  beginGatedMicRecording(sessionId: number): Promise<void>;
+  appendGatedMicRecording(sessionId: number, chunk: Uint8Array): Promise<void>;
+  /**
+   * Transcribes a completed Session's Mic Track in the main process, in the background; with
+   * `gated`, the copy sent with `appendGatedMicRecording`. Rejects when it cannot start.
+   */
+  transcribeMicTrack(sessionId: number, options?: { gated?: boolean }): Promise<MicTranscriptionStatus>;
+  /** Told how every "Transcribe my microphone" job is going, for every Session. */
+  subscribeMicTranscriptions(onStatus: (sessionId: number, status: MicTranscriptionStatus) => void): Unsubscribe;
   listSessions(): Promise<Session[]>;
   /** A Session's stored Transcript, in order. */
   transcript(sessionId: number): Promise<Utterance[]>;
@@ -146,6 +159,14 @@ export interface MicAudioCapture {
    * below the threshold silenced, held open briefly after the level falls (see micGate).
    */
   open(device?: AudioDevice | null, threshold?: number): Promise<AudioCapture>;
+}
+
+/**
+ * Applies the mic threshold to a stored Mic Track: decodes it and returns it as WAV, with
+ * what the gate shuts out silenced, on the same timeline, in chunks.
+ */
+export interface MicRecordingGate {
+  gate(url: string, threshold: number): Promise<Uint8Array[]>;
 }
 
 /** The system's audio input devices (microphones, Stereo Mix, virtual cables). */

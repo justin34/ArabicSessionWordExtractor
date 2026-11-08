@@ -35,7 +35,7 @@ const CONTROL_TOKEN = /^<\w+>$/;
 const END_TOKEN = '<end>';
 
 /** Joins sub-word tokens into words: a token with leading whitespace starts a new word. */
-function toWords(tokens: SonioxToken[]): SttWord[] {
+export function toWords(tokens: Array<Pick<SonioxToken, 'text' | 'start_ms' | 'end_ms'>>): SttWord[] {
   const words: SttWord[] = [];
   for (const t of tokens) {
     const last = words.at(-1);
