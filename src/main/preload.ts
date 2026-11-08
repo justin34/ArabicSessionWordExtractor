@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { TranscriptionFailureListener, TranscriptListener } from '../core/types';
+import type { ReadyUpdate, TranscriptionFailureListener, TranscriptListener } from '../core/types';
 
 contextBridge.exposeInMainWorld('api', {
   startSession: (options?: { mic: boolean }) => ipcRenderer.invoke('sessions:start', options),
@@ -23,6 +23,15 @@ contextBridge.exposeInMainWorld('api', {
   dictionaryNotice: () => ipcRenderer.invoke('credits:dictionaryNotice'),
   exportToAnki: (target: unknown) => ipcRenderer.invoke('anki:export', target),
   showExportedFile: (path: string) => ipcRenderer.invoke('anki:showInFolder', path),
+  bundleProblems: () => ipcRenderer.invoke('app:bundleProblems'),
+  readyUpdate: () => ipcRenderer.invoke('update:ready'),
+  restartToUpdate: () => ipcRenderer.invoke('update:restart'),
+  /** Told when an update has downloaded; returns an unsubscribe. */
+  subscribeUpdateReady: (listener: (update: ReadyUpdate) => void) => {
+    const handler = (_event: IpcRendererEvent, update: ReadyUpdate) => listener(update);
+    ipcRenderer.on('update:downloaded', handler);
+    return () => void ipcRenderer.removeListener('update:downloaded', handler);
+  },
   /** Live Sessions whose speech-to-text stopped; returns an unsubscribe. */
   onTranscriptionFailure: (listener: TranscriptionFailureListener) => {
     const handler = (_event: IpcRendererEvent, ...[id, message]: Parameters<TranscriptionFailureListener>) =>

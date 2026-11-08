@@ -6,7 +6,9 @@ import type {
   ApiKeyStatus,
   AudioDevice,
   AudioSettings,
+  BundleProblem,
   LiveUtterance,
+  ReadyUpdate,
   Session,
   SessionGuide,
   Utterance,
@@ -15,7 +17,7 @@ import type {
   WordDetails,
 } from '../core/types';
 
-export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, LiveUtterance, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails };
+export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, BundleProblem, LiveUtterance, ReadyUpdate, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -63,6 +65,14 @@ export interface Bridge {
   exportToAnki(target: AnkiExportTarget): Promise<AnkiExportResult | null>;
   /** Shows an exported deck in the system's file manager. */
   showExportedFile(path: string): Promise<void>;
+  /** Bundled parts a packaged build is missing or cannot open; empty when all work. */
+  bundleProblems(): Promise<BundleProblem[]>;
+  /** The update downloaded in the background; null until there is one. */
+  readyUpdate(): Promise<ReadyUpdate | null>;
+  /** Told when an update has downloaded. */
+  subscribeUpdateReady(onReady: (update: ReadyUpdate) => void): Unsubscribe;
+  /** Quits and installs the ready update; rejects while a Session is recording. */
+  restartToUpdate(): Promise<void>;
   /** Live transcript for a real Session. */
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void): Unsubscribe;
   /** Why a live Session's speech-to-text has stopped; null while it works. */

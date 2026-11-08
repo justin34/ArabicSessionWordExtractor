@@ -1,8 +1,12 @@
 {
-  "name": "interactive-language-learning",
+  "name": "arabic-session-word-extractor",
+  "productName": "Arabic Session Word Extractor",
   "version": "0.1.0",
   "private": true,
-  "description": "Visual Arabic listening app",
+  "description": "Listens to spoken Arabic, shows a live transcript with English glosses, and builds a vocabulary",
+  "author": "Jabril Hall",
+  "license": "GPL-2.0-or-later",
+  "repository": "github:justin34/ArabicSessionWordExtractor",
   "main": "dist/src/main/main.js",
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -11,7 +15,10 @@
     "build:dictionary": "node scripts/build-dictionary.mjs",
     "build": "tsc -p tsconfig.build.json && vite build",
     "start": "npm run build && electron .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:icon": "node scripts/build-icon.mjs",
+    "dist": "node scripts/dist.mjs",
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@fontsource/noto-naskh-arabic": "^5.3.0",
@@ -23,13 +30,82 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",
     "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "jsdom": "^31.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"
   },
   "dependencies": {
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "electron-updater": "^6.8.11"
+  },
+  "build": {
+    "appId": "com.justin34.arabicsessionwordextractor",
+    "productName": "Arabic Session Word Extractor",
+    "copyright": "Copyright © 2026 Jabril Hall and contributors",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/src/**/*",
+      "!dist/src/**/*.map",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/camel-helper",
+        "to": "camel-helper",
+        "filter": [
+          "**/*",
+          "!analyze.py"
+        ]
+      },
+      {
+        "from": "helper/camel/analyze.py",
+        "to": "camel-helper/analyze.py"
+      },
+      {
+        "from": "vendor/dictionary",
+        "to": "dictionary"
+      },
+      {
+        "from": "src/renderer/fonts/NotoNaskhArabic-Regular.woff2",
+        "to": "fonts/NotoNaskhArabic-Regular.woff2"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "license": "LICENSE",
+      "include": "build/installer.nsh",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "artifactName": "Arabic-Session-Word-Extractor-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "justin34",
+        "repo": "ArabicSessionWordExtractor",
+        "releaseType": "draft"
+      }
+    ]
   }
 }

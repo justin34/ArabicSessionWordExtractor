@@ -65,3 +65,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.credits__app {
+  margin: 0;
+  font-size: var(--text-lg);
+}

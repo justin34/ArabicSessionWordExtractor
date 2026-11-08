@@ -1,0 +1,10 @@
+Arabic icon (the app's icon, Assets/6133924.png and the .ico built from it)
+
+Arabic icons created by Magnific - Flaticon
+https://www.flaticon.com/free-icons/arabic
+
+The icon is used under Flaticon's free licence, which allows use in personal and
+commercial projects on condition that the author is credited as above. It is not
+under an open licence: the icon itself may not be redistributed on its own, sold,
+or offered as part of an icon collection. Flaticon's full terms:
+https://www.flaticon.com/legal

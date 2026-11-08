@@ -19,3 +19,7 @@
   background: var(--color-danger-bg);
   color: var(--color-danger);
 }
+.notice--update {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}

@@ -202,3 +202,15 @@ export interface AnkiExportResult {
   count: number;
   path: string;
 }
+
+/** A bundled part of a packaged build (GLOSSARY: Installer) that is missing or broken. */
+export interface BundleProblem {
+  part: 'analysis' | 'dictionary';
+  /** What the learner is told: what does not work, and to reinstall. */
+  message: string;
+}
+
+/** An update downloaded in the background, waiting for "Restart to update". */
+export interface ReadyUpdate {
+  version: string;
+}

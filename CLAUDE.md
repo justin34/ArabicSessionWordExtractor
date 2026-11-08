@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues and specs are GitHub issues in justin34/InteractiveLanguageLearning (via `gh`). See `docs/agents/issue-tracker.md`.
+Issues and specs are GitHub issues in justin34/ArabicSessionWordExtractor (via `gh`). See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
