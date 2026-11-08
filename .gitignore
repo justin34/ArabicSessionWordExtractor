@@ -3,5 +3,6 @@ dist/
 *.db
 recordings/
 .env
+.claude/
 vendor/
 release/
