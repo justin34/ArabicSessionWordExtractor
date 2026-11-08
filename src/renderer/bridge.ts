@@ -11,13 +11,14 @@ import type {
   ReadyUpdate,
   Session,
   SessionGuide,
+  Track,
   Utterance,
   VocabularyEntry,
   WordCard,
   WordDetails,
 } from '../core/types';
 
-export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, BundleProblem, LiveUtterance, ReadyUpdate, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails };
+export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, BundleProblem, LiveUtterance, ReadyUpdate, SessionGuide, Track, Utterance, VocabularyEntry, WordCard, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -26,10 +27,13 @@ export type Unsubscribe = () => void;
  * preload bridge; tests substitute a fake.
  */
 export interface Bridge {
-  /** With `mic`, the Session also records a Mic Track. */
-  startSession(options?: { mic: boolean }): Promise<Session>;
+  /**
+   * With `mic`, the Session also records a Mic Track; with `transcribeMic` as well, that
+   * Track is transcribed as Learner Utterances.
+   */
+  startSession(options?: { mic: boolean; transcribeMic?: boolean }): Promise<Session>;
   appendDesktopAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
-  /** Writes to the Session's Mic Track; it is never transcribed. */
+  /** Writes to the Session's Mic Track; transcribed only when the Session was started so. */
   appendMicAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
   stopSession(sessionId: number): Promise<Session>;
   listSessions(): Promise<Session[]>;
@@ -75,10 +79,13 @@ export interface Bridge {
   restartToUpdate(): Promise<void>;
   /** Live transcript for a real Session. */
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void): Unsubscribe;
-  /** Why a live Session's speech-to-text has stopped; null while it works. */
-  transcriptionFailure(sessionId: number): Promise<string | null>;
-  /** Told when a live Session's speech-to-text stops; its audio keeps recording. */
-  subscribeTranscriptionFailure(sessionId: number, onFailure: (message: string) => void): Unsubscribe;
+  /** Why a live Session's speech-to-text has stopped on a Track (the Desktop Track by default); null while it works. */
+  transcriptionFailure(sessionId: number, track?: Track): Promise<string | null>;
+  /** Told when a live Session's speech-to-text stops on a Track; its audio keeps recording. */
+  subscribeTranscriptionFailure(
+    sessionId: number,
+    onFailure: (message: string, track: Track) => void,
+  ): Unsubscribe;
 }
 
 /** Thrown by capture when the system offers no desktop audio. */

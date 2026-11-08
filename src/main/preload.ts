@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { ReadyUpdate, TranscriptionFailureListener, TranscriptListener } from '../core/types';
 
 contextBridge.exposeInMainWorld('api', {
-  startSession: (options?: { mic: boolean }) => ipcRenderer.invoke('sessions:start', options),
+  startSession: (options?: { mic: boolean; transcribeMic?: boolean }) => ipcRenderer.invoke('sessions:start', options),
   appendDesktopAudio: (sessionId: number, chunk: Uint8Array) =>
     ipcRenderer.invoke('sessions:appendDesktopAudio', sessionId, chunk),
   appendMicAudio: (sessionId: number, chunk: Uint8Array) =>
@@ -19,7 +19,8 @@ contextBridge.exposeInMainWorld('api', {
   apiKeys: () => ipcRenderer.invoke('settings:apiKeys'),
   saveApiKey: (name: string, key: string | null) => ipcRenderer.invoke('settings:setApiKey', name, key),
   checkApiKey: (name: string) => ipcRenderer.invoke('settings:checkApiKey', name),
-  transcriptionFailure: (sessionId: number) => ipcRenderer.invoke('sessions:transcriptionFailure', sessionId),
+  transcriptionFailure: (sessionId: number, track?: string) =>
+    ipcRenderer.invoke('sessions:transcriptionFailure', sessionId, track),
   dictionaryNotice: () => ipcRenderer.invoke('credits:dictionaryNotice'),
   exportToAnki: (target: unknown) => ipcRenderer.invoke('anki:export', target),
   showExportedFile: (path: string) => ipcRenderer.invoke('anki:showInFolder', path),
@@ -34,8 +35,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   /** Live Sessions whose speech-to-text stopped; returns an unsubscribe. */
   onTranscriptionFailure: (listener: TranscriptionFailureListener) => {
-    const handler = (_event: IpcRendererEvent, ...[id, message]: Parameters<TranscriptionFailureListener>) =>
-      listener(id, message);
+    const handler = (_event: IpcRendererEvent, ...[id, message, track]: Parameters<TranscriptionFailureListener>) =>
+      listener(id, message, track);
     ipcRenderer.on('transcript:failed', handler);
     return () => void ipcRenderer.removeListener('transcript:failed', handler);
   },

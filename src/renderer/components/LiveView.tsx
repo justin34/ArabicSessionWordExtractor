@@ -55,12 +55,23 @@ function TranscriptionWarning({ reason }: { reason: string }) {
   );
 }
 
+function MicTranscriptionWarning({ reason }: { reason: string }) {
+  return (
+    <div className="live__warning live__warning--transcription" role="status">
+      <strong>Transcription of your microphone has stopped.</strong> The teacher is still transcribed,
+      and both tracks are still recording.
+      <span className="live__warning-detail">{reason}</span>
+    </div>
+  );
+}
+
 export function LiveView({
   session,
   now,
   utterances,
   getLevel,
   transcriptionFailure,
+  micTranscriptionFailure,
   onStop,
   onBack,
   loadWordDetails,
@@ -72,6 +83,8 @@ export function LiveView({
   getLevel?: () => number;
   /** Why speech-to-text stopped; the recording carries on without it. */
   transcriptionFailure?: string;
+  /** Why the Mic Track's speech-to-text stopped; the rest carries on without it. */
+  micTranscriptionFailure?: string;
   onStop: () => void;
   onBack: () => void;
   loadWordDetails: LoadWordDetails;
@@ -116,6 +129,7 @@ export function LiveView({
         </button>
       </header>
       {transcriptionFailure && <TranscriptionWarning reason={transcriptionFailure} />}
+      {micTranscriptionFailure && <MicTranscriptionWarning reason={micTranscriptionFailure} />}
       {translationError && <TranslationWarning error={translationError} />}
       <div className="live__bodywrap">
         <div className="live__body" role="log" aria-label="Transcript" ref={logRef} onScroll={onScroll}>

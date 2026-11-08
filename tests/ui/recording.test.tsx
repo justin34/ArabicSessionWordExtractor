@@ -20,7 +20,11 @@ describe('Start flow', () => {
     const mic = screen.getByRole('checkbox', { name: 'Also record my microphone' }) as HTMLInputElement;
     expect(mic.disabled).toBe(false);
     expect(mic.checked).toBe(false);
-    expect(dialog.textContent).toMatch(/never transcribed/i);
+    expect(dialog.textContent).toMatch(/separate track/i);
+    // Transcribing the mic is unticked, and off until the mic itself is ticked.
+    const transcribe = screen.getByRole('checkbox', { name: 'Also transcribe my speech' }) as HTMLInputElement;
+    expect(transcribe.checked).toBe(false);
+    expect(transcribe.disabled).toBe(true);
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();

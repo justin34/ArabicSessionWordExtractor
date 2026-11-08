@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react';
 import type { ApiKeyName, ApiKeyStatus, AudioSettings } from '../bridge';
 import './StartPanel.css';
 
+/** Whether a speech-to-text key is set; true while the keys load, so nothing is disabled for nothing. */
+function hasSpeechToTextKey(keys: ApiKeyStatus[] | null): boolean {
+  if (!keys) return true;
+  return keys.some((k) => (k.name === 'soniox' || k.name === 'deepgram') && k.source !== null);
+}
+
 /** What a Session will be without, given which keys are set; nothing while they load. */
 function missingKeyWarnings(keys: ApiKeyStatus[] | null): string[] {
   if (!keys) return [];
@@ -26,11 +32,16 @@ export function StartPanel({
   /** Which API keys are set; null while they load. */
   keys?: ApiKeyStatus[] | null;
   onOpenSettings?: () => void;
-  /** `mic` is whether the learner chose to also record the microphone as a Mic Track. */
-  onStart: (options: { mic: boolean }) => void;
+  /**
+   * `mic` is whether the learner chose to also record the microphone as a Mic Track;
+   * `transcribeMic`, set only when true, whether to transcribe it as Learner Utterances.
+   */
+  onStart: (options: { mic: boolean; transcribeMic?: boolean }) => void;
   onCancel: () => void;
 }) {
   const [mic, setMic] = useState(false);
+  const [transcribeMic, setTranscribeMic] = useState(false);
+  const canTranscribeMic = mic && hasSpeechToTextKey(keys);
   const warnings = missingKeyWarnings(keys);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -76,14 +87,35 @@ export function StartPanel({
           <label htmlFor="mic-option">Also record my microphone</label>
           <span id="mic-note" className="modal__note">
             {devices && <>From {devices.microphone?.label ?? 'the default microphone'}. </>}
-            Saved as a separate track that plays alongside in Replay. It is never transcribed.
+            Saved as a separate track that plays alongside in Replay.
           </span>
+          <div className="modal__option modal__option--nested">
+            <input
+              id="transcribe-mic-option"
+              type="checkbox"
+              checked={canTranscribeMic && transcribeMic}
+              disabled={!canTranscribeMic}
+              onChange={(e) => setTranscribeMic(e.target.checked)}
+              aria-describedby="transcribe-mic-note"
+            />
+            <label htmlFor="transcribe-mic-option">Also transcribe my speech</label>
+            <span id="transcribe-mic-note" className="modal__note">
+              Shown in its own colour and never added to your vocabulary. Use headphones, or set a mic
+              threshold in Settings, so the teacher isn’t transcribed as you. Speech-to-text usage roughly
+              doubles while you speak.
+            </span>
+          </div>
         </div>
         <div className="modal__actions">
           <button type="button" className="btn" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className="btn btn--primary" onClick={() => onStart({ mic })} autoFocus>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => onStart(canTranscribeMic && transcribeMic ? { mic, transcribeMic: true } : { mic })}
+            autoFocus
+          >
             Start
           </button>
         </div>

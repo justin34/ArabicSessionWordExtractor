@@ -10,24 +10,33 @@ import type {
   LiveUtterance,
   Session,
   Token,
+  Track,
   TranscriptionFailureListener,
   TranscriptListener,
   Utterance,
 } from './types';
 
-interface LiveSession {
-  desktopTrackPath: string;
-  /** Null when the learner chose not to record the microphone. Never transcribed. */
-  micTrackPath: string | null;
+/** One Track's speech-to-text stream (ADR 0004: never one mixed stream). */
+interface TrackStream {
+  track: Track;
   audio: AudioChannel;
-  /** False once speech-to-text has failed; audio then goes to the Desktop Track only. */
+  /** False once speech-to-text has failed; audio then goes to the Track's file only. */
   transcribing: boolean;
-  /** Set once the Session is being stopped, so the stream ending then is no failure. */
-  stopping: boolean;
-  /** Why speech-to-text stopped before the Session did; undefined while it works. */
-  transcriptionFailure?: string;
+  /** Why this stream stopped before the Session did; undefined while it works. */
+  failure?: string;
   /** Settles when the provider pipeline has drained. Never rejects. */
   transcribed: Promise<void>;
+}
+
+interface LiveSession {
+  desktopTrackPath: string;
+  /** Null when the learner chose not to record the microphone. */
+  micTrackPath: string | null;
+  desktop: TrackStream;
+  /** The Mic Track's own stream, only when the learner asked for their speech transcribed. */
+  mic: TrackStream | null;
+  /** Set once the Session is being stopped, so a stream ending then is no failure. */
+  stopping: boolean;
   /** Translations and analyses of final Utterances still in flight. Each settles, never rejects. */
   followUps: Set<Promise<void>>;
 }
@@ -44,6 +53,13 @@ interface FinalUtterance {
 /** How long analysis waits for an Utterance's translation before going on without it. */
 const DEFAULT_TRANSLATION_WAIT_MS = 3000;
 
+export interface StartOptions {
+  /** Also record the microphone, as the Mic Track. */
+  mic?: boolean;
+  /** Also transcribe the Mic Track, as Learner Utterances; needs `mic`. */
+  transcribeMic?: boolean;
+}
+
 export interface SessionsOptions {
   /** How long analysis waits for an Utterance's translation; 3 s by default. */
   translationWaitMs?: number;
@@ -54,7 +70,9 @@ export interface SessionsOptions {
  * Desktop Track and, at the same time, fed to speech-to-text; each final Utterance is
  * stored in the Session's Transcript and shown at once, then translated and analyzed.
  * Analysis waits briefly for the translation, which helps it pick each word's reading,
- * and resolves the words to Lemmas, which go into the Vocabulary.
+ * and resolves the words to Lemmas, which go into the Vocabulary. When the learner asks,
+ * the Mic Track gets its own stream too: its Learner Utterances are stored and translated,
+ * but never analyzed, so nothing the learner says becomes a study word (ADR 0004).
  */
 export class Sessions {
   private readonly live = new Map<number, LiveSession>();
@@ -78,9 +96,11 @@ export class Sessions {
 
   /**
    * Begins a live Session. `extension` is the Desktop Track's audio file type; with `mic`,
-   * the Session also has a Mic Track, a separate file of the same type.
+   * the Session also has a Mic Track, a separate file of the same type, and with
+   * `transcribeMic` that Track is transcribed on a second stream.
    */
-  start(extension = 'webm', { mic = false }: { mic?: boolean } = {}): Session {
+  start(extension = 'webm', { mic = false, transcribeMic = false }: StartOptions = {}): Session {
+    if (transcribeMic && !mic) throw new Error('Only a recorded microphone can be transcribed');
     const session = this.store.createSession(
       new Date().toISOString(),
       (id) => join(this.recordingsDir, `session-${id}-desktop.${extension}`),
@@ -88,17 +108,24 @@ export class Sessions {
     );
     writeFileSync(session.desktopTrackPath, new Uint8Array());
     if (session.micTrackPath) writeFileSync(session.micTrackPath, new Uint8Array());
+    const stream = (track: Track): TrackStream => ({
+      track,
+      audio: new AudioChannel(),
+      transcribing: true,
+      transcribed: Promise.resolve(),
+    });
     const live: LiveSession = {
       desktopTrackPath: session.desktopTrackPath,
       micTrackPath: session.micTrackPath,
-      audio: new AudioChannel(),
-      transcribing: true,
+      desktop: stream('desktop'),
+      mic: transcribeMic ? stream('mic') : null,
       stopping: false,
-      transcribed: Promise.resolve(),
       followUps: new Set(),
     };
     this.live.set(session.id, live);
-    live.transcribed = this.transcribe(session.id, live);
+    for (const s of [live.desktop, live.mic]) {
+      if (s) s.transcribed = this.transcribe(session.id, live, s);
+    }
     return session;
   }
 
@@ -106,15 +133,19 @@ export class Sessions {
     const live = this.live.get(sessionId);
     if (!live) throw new Error(`Session ${sessionId} is not recording`);
     appendFileSync(live.desktopTrackPath, chunk);
-    if (live.transcribing) live.audio.push(chunk);
+    if (live.desktop.transcribing) live.desktop.audio.push(chunk);
   }
 
-  /** Writes microphone audio to the Session's Mic Track. It is never sent for transcription. */
+  /**
+   * Writes microphone audio to the Session's Mic Track. It is sent for transcription only
+   * when the Session was started with `transcribeMic`.
+   */
   appendMicAudio(sessionId: number, chunk: Uint8Array): void {
     const live = this.live.get(sessionId);
     if (!live) throw new Error(`Session ${sessionId} is not recording`);
     if (!live.micTrackPath) throw new Error(`Session ${sessionId} has no Mic Track`);
     appendFileSync(live.micTrackPath, chunk);
+    if (live.mic?.transcribing) live.mic.audio.push(chunk);
   }
 
   /**
@@ -126,8 +157,9 @@ export class Sessions {
     if (!live) return this.store.getSession(sessionId);
     this.live.delete(sessionId);
     live.stopping = true;
-    live.audio.close();
-    await live.transcribed;
+    live.desktop.audio.close();
+    live.mic?.audio.close();
+    await Promise.all([live.desktop.transcribed, live.mic?.transcribed]);
     // Translations and analyses started by the last Utterances finish before the Session completes.
     while (live.followUps.size > 0) await Promise.all(live.followUps);
     const session = this.store.completeSession(sessionId, new Date().toISOString());
@@ -160,17 +192,22 @@ export class Sessions {
   }
 
   /**
-   * Told when a live Session's speech-to-text stops early: the provider failed, the
-   * stream dropped, or there is no key. The Session's audio keeps recording.
+   * Told when a live Session's speech-to-text stops early on a Track: the provider failed,
+   * the stream dropped, or there is no key. The Session's audio keeps recording, and the
+   * other Track's stream carries on.
    */
   subscribeTranscriptionFailures(listener: TranscriptionFailureListener): () => void {
     this.failureListeners.add(listener);
     return () => void this.failureListeners.delete(listener);
   }
 
-  /** Why a live Session's speech-to-text stopped; undefined while it works or once the Session ends. */
-  transcriptionFailure(sessionId: number): string | undefined {
-    return this.live.get(sessionId)?.transcriptionFailure;
+  /**
+   * Why a live Session's speech-to-text stopped on a Track; undefined while it works, when
+   * that Track is not transcribed, or once the Session ends.
+   */
+  transcriptionFailure(sessionId: number, track: Track = 'desktop'): string | undefined {
+    const live = this.live.get(sessionId);
+    return (track === 'mic' ? live?.mic : live?.desktop)?.failure;
   }
 
   list(): Session[] {
@@ -209,14 +246,26 @@ export class Sessions {
     }
   }
 
-  private async transcribe(sessionId: number, live: LiveSession): Promise<void> {
-    // Interim text and the final Utterance it becomes share one live id.
+  private async transcribe(sessionId: number, live: LiveSession, stream: TrackStream): Promise<void> {
+    const { track } = stream;
+    const learner = track === 'mic';
+    // Interim text and the final Utterance it becomes share one live id; the Tracks' never clash.
     let utteranceIndex = 0;
+    const liveId = (n: number) => (learner ? `mic-${n}` : String(n));
+    // A Learner Utterance says where it is from; Live View interleaves both Tracks by start.
+    const placed = (startMs: number) => (learner ? { track, startMs } : { startMs });
     try {
-      for await (const event of this.providers.speechToText.transcribe(live.audio)) {
-        const id = String(utteranceIndex);
+      for await (const event of this.providers.speechToText.transcribe(stream.audio)) {
+        const id = liveId(utteranceIndex);
         if (event.type === 'interim') {
-          this.emit(sessionId, { id, isFinal: false, text: event.text, translation: '', tokens: [] });
+          this.emit(sessionId, {
+            id,
+            isFinal: false,
+            text: event.text,
+            translation: '',
+            tokens: [],
+            ...placed(event.startMs),
+          });
           continue;
         }
         utteranceIndex++;
@@ -228,7 +277,14 @@ export class Sessions {
           gloss: '',
           lemmaId: null,
         }));
-        const final: LiveUtterance = { id, isFinal: true, text: event.text, translation: '', tokens };
+        const final: LiveUtterance = {
+          id,
+          isFinal: true,
+          text: event.text,
+          translation: '',
+          tokens,
+          ...placed(event.startMs),
+        };
         const utteranceId = this.store.addUtterance({
           sessionId,
           text: event.text,
@@ -236,6 +292,7 @@ export class Sessions {
           startMs: event.startMs,
           endMs: event.endMs,
           tokens,
+          track,
         });
         this.emit(sessionId, final);
         const utterance: FinalUtterance = {
@@ -246,32 +303,34 @@ export class Sessions {
         };
         // An Utterance of Foreign words only stays in the Transcript, untranslated and unanalyzed.
         if (!hasArabicWord(event.text)) continue;
-        // Neither holds up the next Utterance's speech-to-text.
+        // Neither holds up the next Utterance's speech-to-text. A Learner Utterance is
+        // translated, never analyzed: its words get no Lemma and no gloss (ADR 0004).
         const translated = this.translate(utterance);
-        const analyzed = this.analyze(utterance, this.withinWait(translated));
-        for (const work of [translated.then(() => {}), analyzed]) {
-          const followUp = work.finally(() => live.followUps.delete(followUp));
+        const work = [translated.then(() => {})];
+        if (!learner) work.push(this.analyze(utterance, this.withinWait(translated)));
+        for (const w of work) {
+          const followUp = w.finally(() => live.followUps.delete(followUp));
           live.followUps.add(followUp);
         }
       }
       // A stream that ends while the Session still records was dropped by the service.
-      if (!live.stopping) this.failTranscription(sessionId, live, 'The speech-to-text service ended the stream early.');
+      if (!live.stopping) this.failTranscription(sessionId, stream, 'The speech-to-text service ended the stream early.');
     } catch (err) {
-      // The Desktop Track is written independently; a provider failure must never lose audio.
-      console.error(`Transcription failed for Session ${sessionId}:`, err);
-      if (!live.stopping) this.failTranscription(sessionId, live, (err as Error).message || String(err));
+      // Each Track is written independently; a provider failure must never lose audio.
+      console.error(`Transcription of the ${track} track failed for Session ${sessionId}:`, err);
+      if (!live.stopping) this.failTranscription(sessionId, stream, (err as Error).message || String(err));
     } finally {
       // Nothing reads the channel any more, so stop queueing audio into it.
-      live.transcribing = false;
+      stream.transcribing = false;
     }
   }
 
-  private failTranscription(sessionId: number, live: LiveSession, message: string): void {
-    live.transcribing = false;
-    live.transcriptionFailure = message;
+  private failTranscription(sessionId: number, stream: TrackStream, message: string): void {
+    stream.transcribing = false;
+    stream.failure = message;
     for (const listener of this.failureListeners) {
       try {
-        listener(sessionId, message);
+        listener(sessionId, message, stream.track);
       } catch (err) {
         console.error('Transcription failure listener failed:', err);
       }

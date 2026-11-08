@@ -29,6 +29,7 @@ const utterance = (
     startMs: startMs + i * 500,
     endMs: startMs + i * 500 + 400,
   })),
+  track: 'desktop',
 });
 
 const transcript: Utterance[] = [
