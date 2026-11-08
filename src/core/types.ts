@@ -97,6 +97,11 @@ export interface AudioSettings {
   desktopSource: AudioDevice | null;
   /** The Mic Track's microphone: null is the system default. */
   microphone: AudioDevice | null;
+  /**
+   * Mic threshold: the input level (0 to 1, as the level meter shows it) below which mic
+   * audio is not sent to speech-to-text. Absent is off: everything passes.
+   */
+  micThreshold?: number;
 }
 
 /**

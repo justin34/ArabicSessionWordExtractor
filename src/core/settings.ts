@@ -41,11 +41,15 @@ function asDevice(value: unknown): AudioDevice | null | undefined {
 /** Audio settings as given (from the settings file or the renderer); undefined when malformed. */
 export function parseAudioSettings(value: unknown): AudioSettings | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { desktopSource, microphone } = value as Record<string, unknown>;
+  const { desktopSource, microphone, micThreshold } = value as Record<string, unknown>;
   const desktop = asDevice(desktopSource ?? null);
   const mic = asDevice(microphone ?? null);
   if (desktop === undefined || mic === undefined) return undefined;
-  return { desktopSource: desktop, microphone: mic };
+  const settings: AudioSettings = { desktopSource: desktop, microphone: mic };
+  // Absent, null or 0 is off; anything else must be a level the meter can show.
+  if (micThreshold === undefined || micThreshold === null || micThreshold === 0) return settings;
+  if (typeof micThreshold !== 'number' || !(micThreshold > 0 && micThreshold <= 1)) return undefined;
+  return { ...settings, micThreshold };
 }
 
 export function isApiKeyName(value: unknown): value is ApiKeyName {

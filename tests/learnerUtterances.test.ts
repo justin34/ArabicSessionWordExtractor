@@ -177,6 +177,30 @@ describe('Learner Utterances', () => {
     expect(() => app.sessions.start('webm', { transcribeMic: true })).toThrow(/microphone/);
   });
 
+  it('with the mic threshold set, hear only the gated mic audio while the Mic Track keeps everything (#44)', async () => {
+    const stt = new ScriptedStreams([[final(TEACHER, 0)], [final(LEARNER, 1000)]]);
+    const { app } = open(stt);
+    const { id } = app.sessions.start('webm', { mic: true, transcribeMic: true, gateMic: true });
+    app.sessions.appendDesktopAudio(id, new Uint8Array([1, 2]));
+    app.sessions.appendMicAudio(id, new Uint8Array([7, 8]));
+    app.sessions.appendGatedMicAudio(id, new Uint8Array([0, 8]));
+    const done = await app.sessions.stop(id);
+
+    expect(stt.received).toEqual([
+      [1, 2],
+      [0, 8],
+    ]);
+    expect([...readFileSync(done.micTrackPath!)]).toEqual([7, 8]);
+    expect(app.sessions.transcript(id).map((u) => u.track)).toEqual(['desktop', 'mic']);
+  });
+
+  it('take gated mic audio only from a Session started with the threshold, which needs mic transcription', () => {
+    const { app } = open(new ScriptedStreams([]));
+    expect(() => app.sessions.start('webm', { mic: true, gateMic: true })).toThrow(/gated/);
+    const { id } = app.sessions.start('webm', { mic: true, transcribeMic: true });
+    expect(() => app.sessions.appendGatedMicAudio(id, new Uint8Array([1]))).toThrow(/gated/);
+  });
+
   it('stop alone when the mic stream fails: the teacher is still transcribed and both Tracks keep every chunk', async () => {
     const stt = new ScriptedStreams([[final(TEACHER, 0)], new Error('Soniox error 503')]);
     const { app, failures } = open(stt);

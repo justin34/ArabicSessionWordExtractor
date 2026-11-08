@@ -204,15 +204,19 @@ function registerIpc({ sessions, vocabulary, words, guides, anki, settings, apiK
     void shutDown().finally(() => autoUpdater.quitAndInstall());
   });
   ipcMain.handle('sessions:start', (_event, options: unknown) => {
-    const o = options as { mic?: unknown; transcribeMic?: unknown } | undefined;
+    const o = options as { mic?: unknown; transcribeMic?: unknown; gateMic?: unknown } | undefined;
     const mic = o?.mic === true;
-    return sessions.start('webm', { mic, transcribeMic: mic && o?.transcribeMic === true });
+    const transcribeMic = mic && o?.transcribeMic === true;
+    return sessions.start('webm', { mic, transcribeMic, gateMic: transcribeMic && o?.gateMic === true });
   });
   ipcMain.handle('sessions:appendDesktopAudio', (_event, id: unknown, chunk: unknown) =>
     sessions.appendDesktopAudio(requireSessionId(id), requireChunk(chunk)),
   );
   ipcMain.handle('sessions:appendMicAudio', (_event, id: unknown, chunk: unknown) =>
     sessions.appendMicAudio(requireSessionId(id), requireChunk(chunk)),
+  );
+  ipcMain.handle('sessions:appendGatedMicAudio', (_event, id: unknown, chunk: unknown) =>
+    sessions.appendGatedMicAudio(requireSessionId(id), requireChunk(chunk)),
   );
   ipcMain.handle('sessions:stop', (_event, id: unknown) => sessions.stop(requireSessionId(id)));
   ipcMain.handle('sessions:list', () => sessions.list());

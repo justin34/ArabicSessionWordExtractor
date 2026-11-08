@@ -25,6 +25,48 @@
   color: var(--color-text);
   font: inherit;
 }
+.threshold {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+}
+.threshold__meter {
+  position: relative;
+  grid-column: 1;
+  height: 10px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-muted);
+}
+.threshold__level {
+  height: 100%;
+  background: var(--color-text-muted);
+  transition: width 90ms linear;
+}
+.threshold__level--passes {
+  background: var(--color-accent);
+}
+.threshold__mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--color-text);
+}
+.threshold input[type='range'] {
+  grid-column: 1;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+.threshold__value {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 3.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .settings__note {
   margin: 0;
   font-size: var(--text-sm);

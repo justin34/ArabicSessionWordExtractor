@@ -35,6 +35,8 @@ interface LiveSession {
   desktop: TrackStream;
   /** The Mic Track's own stream, only when the learner asked for their speech transcribed. */
   mic: TrackStream | null;
+  /** True when the mic stream is fed gated audio of its own, not the Mic Track as recorded. */
+  gateMic: boolean;
   /** Set once the Session is being stopped, so a stream ending then is no failure. */
   stopping: boolean;
   /** Translations and analyses of final Utterances still in flight. Each settles, never rejects. */
@@ -58,6 +60,11 @@ export interface StartOptions {
   mic?: boolean;
   /** Also transcribe the Mic Track, as Learner Utterances; needs `mic`. */
   transcribeMic?: boolean;
+  /**
+   * The mic threshold is set: speech-to-text hears the gated mic audio sent with
+   * `appendGatedMicAudio`, never the Mic Track itself; needs `transcribeMic`.
+   */
+  gateMic?: boolean;
 }
 
 export interface SessionsOptions {
@@ -99,8 +106,9 @@ export class Sessions {
    * the Session also has a Mic Track, a separate file of the same type, and with
    * `transcribeMic` that Track is transcribed on a second stream.
    */
-  start(extension = 'webm', { mic = false, transcribeMic = false }: StartOptions = {}): Session {
+  start(extension = 'webm', { mic = false, transcribeMic = false, gateMic = false }: StartOptions = {}): Session {
     if (transcribeMic && !mic) throw new Error('Only a recorded microphone can be transcribed');
+    if (gateMic && !transcribeMic) throw new Error('Only a transcribed microphone can be gated');
     const session = this.store.createSession(
       new Date().toISOString(),
       (id) => join(this.recordingsDir, `session-${id}-desktop.${extension}`),
@@ -119,6 +127,7 @@ export class Sessions {
       micTrackPath: session.micTrackPath,
       desktop: stream('desktop'),
       mic: transcribeMic ? stream('mic') : null,
+      gateMic,
       stopping: false,
       followUps: new Set(),
     };
@@ -138,13 +147,25 @@ export class Sessions {
 
   /**
    * Writes microphone audio to the Session's Mic Track. It is sent for transcription only
-   * when the Session was started with `transcribeMic`.
+   * when the Session was started with `transcribeMic`, and not with `gateMic`.
    */
   appendMicAudio(sessionId: number, chunk: Uint8Array): void {
     const live = this.live.get(sessionId);
     if (!live) throw new Error(`Session ${sessionId} is not recording`);
     if (!live.micTrackPath) throw new Error(`Session ${sessionId} has no Mic Track`);
     appendFileSync(live.micTrackPath, chunk);
+    if (!live.gateMic && live.mic?.transcribing) live.mic.audio.push(chunk);
+  }
+
+  /**
+   * Sends gated microphone audio to speech-to-text, for a Session started with `gateMic`:
+   * the Mic Track's timeline, with what was below the mic threshold silenced. Never
+   * written to the Mic Track, which keeps everything.
+   */
+  appendGatedMicAudio(sessionId: number, chunk: Uint8Array): void {
+    const live = this.live.get(sessionId);
+    if (!live) throw new Error(`Session ${sessionId} is not recording`);
+    if (!live.gateMic) throw new Error(`Session ${sessionId} has no gated mic audio`);
     if (live.mic?.transcribing) live.mic.audio.push(chunk);
   }
 
