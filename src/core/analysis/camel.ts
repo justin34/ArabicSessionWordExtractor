@@ -36,6 +36,7 @@ const MAX_RESTART_DELAY_MS = 30_000;
 
 interface Request {
   sentence: string;
+  translation?: string;
   resolve(tokens: TokenAnalysis[]): void;
   reject(err: Error): void;
   timer: NodeJS.Timeout;
@@ -93,13 +94,13 @@ export class CamelArabicAnalyzer implements ArabicAnalyzer {
     return this.child?.pid;
   }
 
-  analyze(sentence: string): Promise<TokenAnalysis[]> {
+  analyze(sentence: string, translation?: string): Promise<TokenAnalysis[]> {
     if (this.closed) return Promise.reject(new Error('Arabic analysis helper is shut down'));
     this.start();
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       const timer = setTimeout(() => this.timedOut(id), this.requestTimeoutMs);
-      this.queued.set(id, { sentence, resolve, reject, timer });
+      this.queued.set(id, { sentence, translation: translation || undefined, resolve, reject, timer });
       if (this.ready) this.sendQueued();
     });
   }
@@ -177,7 +178,7 @@ export class CamelArabicAnalyzer implements ArabicAnalyzer {
     for (const [id, request] of this.queued) {
       this.queued.delete(id);
       this.inFlight.set(id, request);
-      stdin.write(`${JSON.stringify({ id, sentence: request.sentence })}\n`);
+      stdin.write(`${JSON.stringify({ id, sentence: request.sentence, translation: request.translation })}\n`);
     }
   }
 

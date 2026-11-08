@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApp, type App } from '../src/core/app';
+import { createApp, type App, type AppOptions } from '../src/core/app';
 import {
   FakeArabicAnalyzer,
   FakeDictionary,
@@ -41,8 +41,8 @@ function fakeProviders(overrides: Partial<Providers> = {}): Providers {
 let dir: string;
 let app: App | undefined;
 
-function open(providers = fakeProviders()): App {
-  app = createApp({ dataDir: dir, providers });
+function open(providers = fakeProviders(), options: Partial<AppOptions> = {}): App {
+  app = createApp({ dataDir: dir, providers, ...options });
   return app;
 }
 
@@ -453,6 +453,59 @@ describe('Vocabulary', () => {
     );
   });
 
+  it("analyzes each Utterance with its translation, which helps pick each word's reading", async () => {
+    const heard: [string, string | undefined][] = [];
+    const fake = new FakeArabicAnalyzer(lemmas);
+    const recording: ArabicAnalyzer = {
+      analyze: (sentence, translation) => {
+        heard.push([sentence, translation]);
+        return fake.analyze(sentence);
+      },
+    };
+    const translator = new FakeTranslator({ 'كتب الطالب الدرس.': 'The student wrote the lesson.' });
+    const core = open(fakeProviders({ speechToText: new FakeSpeechToText(classOne), arabicAnalyzer: recording, translator }));
+
+    await core.sessions.processRecording(recordedFile([1]));
+
+    // The second Utterance has no translation, so it is analyzed without one.
+    expect(heard).toEqual([
+      ['كتب الطالب الدرس.', 'The student wrote the lesson.'],
+      ['الطلاب كتبوا', undefined],
+    ]);
+  });
+
+  it('analyzes without the translation when it fails or is slow to arrive', async () => {
+    const heard: (string | undefined)[] = [];
+    const fake = new FakeArabicAnalyzer(lemmas);
+    const recording: ArabicAnalyzer = {
+      analyze: (sentence, translation) => {
+        heard.push(translation);
+        return fake.analyze(sentence);
+      },
+    };
+    let calls = 0;
+    let release!: (t: string) => void;
+    const translator: Translator = {
+      translate: () =>
+        calls++ === 0
+          ? Promise.reject(new Error('translation service down'))
+          : new Promise((resolve) => (release = resolve)),
+    };
+    const core = open(
+      fakeProviders({ speechToText: new FakeSpeechToText(classOne), arabicAnalyzer: recording, translator }),
+      { translationWaitMs: 20 },
+    );
+    const s = core.sessions.start();
+    const stopping = core.sessions.stop(s.id);
+
+    await vi.waitFor(() => expect(heard).toEqual([undefined, undefined]));
+    expect(core.vocabulary.list()).toHaveLength(3);
+
+    release('The students wrote');
+    await stopping;
+    expect(core.sessions.transcript(s.id)[1].translation).toBe('The students wrote');
+  });
+
   it('is empty before anything is heard', () => {
     expect(open().vocabulary.list()).toEqual([]);
   });
@@ -576,6 +629,7 @@ describe('Word Cards and Session Guides', () => {
     const slow: Translator = { translate: () => new Promise((resolve) => (release = resolve)) };
     const core = open(
       fakeProviders({ speechToText: new FakeSpeechToText(classTwo), arabicAnalyzer: analyzer, dictionary, translator: slow }),
+      { translationWaitMs: 20 },
     );
     const s = core.sessions.start();
     let stopped = false;

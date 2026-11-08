@@ -52,10 +52,19 @@ export interface AppOptions {
   keys?: ApiKeysOptions;
   /** Detail Modules for the word panel and Word Cards, in order; all built-ins by default. */
   detailModules?: DetailModuleConfig;
+  /** How long analysis waits for an Utterance's translation; 3 s by default. */
+  translationWaitMs?: number;
 }
 
 /** Wires local storage and the providers into the Session pipeline. */
-export function createApp({ dataDir, providers: given, secrets, keys, detailModules }: AppOptions): App {
+export function createApp({
+  dataDir,
+  providers: given,
+  secrets,
+  keys,
+  detailModules,
+  translationWaitMs,
+}: AppOptions): App {
   mkdirSync(dataDir, { recursive: true });
   const settings = new Settings(join(dataDir, 'settings.json'), secrets);
   const apiKeys = new ApiKeys(settings, keys);
@@ -65,7 +74,9 @@ export function createApp({ dataDir, providers: given, secrets, keys, detailModu
   store.removeForeignWords(isArabicWord);
   const builder = new WordDetailsBuilder(store, { store, dictionary: providers.dictionary }, detailModules);
   const studyGuides = new StudyGuides(store, builder);
-  const sessions = new Sessions(store, providers, join(dataDir, 'recordings'), studyGuides);
+  const sessions = new Sessions(store, providers, join(dataDir, 'recordings'), studyGuides, {
+    translationWaitMs,
+  });
   // Sessions a crash ended, and data from before study guides, get theirs now.
   studyGuides.catchUp();
   const vocabulary: Vocabulary = { list: () => store.listVocabulary() };

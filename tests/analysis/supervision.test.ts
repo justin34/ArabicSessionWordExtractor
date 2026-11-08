@@ -63,6 +63,16 @@ describe('Arabic analysis helper supervision', () => {
     ]);
   });
 
+  it("sends the sentence's translation along with it, when there is one", async () => {
+    const a = supervise();
+
+    const [withIt] = await a.analyze('translation', 'The student wrote the lesson');
+    const [without] = await a.analyze('translation');
+
+    expect(withIt!.lemma).toBe('The student wrote the lesson');
+    expect(without!.lemma).toBe('undefined');
+  });
+
   it('answers sentences sent at once, each with its own reply', async () => {
     const a = supervise();
 

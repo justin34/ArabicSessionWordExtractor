@@ -26,8 +26,8 @@ beforeAll(async () => {
 
 afterAll(() => analyzer?.close());
 
-async function word(sentence: string, surface: string): Promise<TokenAnalysis> {
-  const token = (await analyzer.analyze(sentence)).find((t) => t.surface === surface);
+async function word(sentence: string, surface: string, translation?: string): Promise<TokenAnalysis> {
+  const token = (await analyzer.analyze(sentence, translation)).find((t) => t.surface === surface);
   if (!token) throw new Error(`${surface} not in ${sentence}`);
   return token;
 }
@@ -106,14 +106,56 @@ describe.skipIf(!built)('Arabic analysis by the CAMeL helper', () => {
     expect(alignToTokens(analyses, tokens)).toEqual([0, 1, 2, 3, 4, 5]);
   });
 
-  // MLE disambiguation in camel-tools picks each word's reading out of context
-  // (camel_tools/disambig/mle.py), so one bare spelling gets one reading in every sentence.
-  // Sentence-context disambiguation is not met yet (#20); these flip to passing when it is.
-  it.fails('reads bare كتب as "books" after a verb, not "wrote"', async () => {
+  it('reads bare كتب as "books" after a verb, and as "wrote" at the start of a sentence', async () => {
     expect((await word('قرأت كتب كثيرة في المكتبة', 'كتب')).partOfSpeech).toBe('noun');
+    expect((await word('كتب الطالب الدرس', 'كتب')).partOfSpeech).toBe('verb');
+    // كان and its sisters take a verb straight after them.
+    expect((await word('كان كتب الرسالة', 'كتب')).partOfSpeech).toBe('verb');
   });
 
-  it.fails('reads العلم as "the flag" when soldiers raise it, not "knowledge"', async () => {
-    expect((await word('رفع الجنود العلم فوق المبنى', 'العلم')).lemma).toBe('عَلَم');
+  it('reads العلم as "the flag" when its translation says so, and "knowledge" otherwise', async () => {
+    const flag = await word('رفع الجنود العلم فوق المبنى', 'العلم', 'The soldiers raised the flag above the building');
+    const knowledge = await word('طلب العلم فريضة على كل مسلم', 'العلم', 'Seeking knowledge is a duty of every Muslim');
+
+    expect([flag.lemma, flag.stemGloss]).toEqual(['عَلَم', 'flag;banner;badge']);
+    expect(knowledge.lemma).toBe('عِلْم');
+  });
+
+  // Each spelling, read two ways in two real MSA sentences by their translations.
+  it.each([
+    ['العالم', 'سافر حول العالم', 'He traveled around the world', 'عالَم', 'noun'],
+    ['العالم', 'اكتشف العالم دواء جديدا', 'The scientist discovered a new medicine', 'عالِم', 'noun'],
+    ['ذهب', 'ذهب الولد إلى المدرسة', 'The boy went to school', 'ذَهَب', 'verb'],
+    ['ذهب', 'اشترت خاتما من ذهب', 'She bought a ring of gold', 'ذَهَب', 'noun'],
+    ['عمر', 'قال عمر إنه سيأتي', 'Omar said he would come', 'عُمَر', 'noun_prop'],
+    ['عمر', 'عمر الإنسان قصير', 'Human life is short', 'عُمْر', 'noun'],
+    ['قدم', 'قدم الطالب بحثه', 'The student presented his research', 'قَدَّم', 'verb'],
+    ['قدم', 'كسرت قدم اللاعب', "The player's foot was broken", 'قَدَم', 'noun'],
+    ['حب', 'حب الوطن واجب', 'Love of the homeland is a duty', 'حُبّ', 'noun'],
+    ['حب', 'يأكل الطائر حب القمح', 'The bird eats wheat grains', 'حَبّ', 'noun'],
+  ])('reads %s in "%s" (%s) as %s', async (surface, sentence, translation, lemma, partOfSpeech) => {
+    expect(await word(sentence, surface, translation)).toMatchObject({ lemma, partOfSpeech });
+  });
+
+  it("takes the MLE model's reading of a word it knows, not a look-alike", async () => {
+    // camel-tools' own matching gave ليس "be valiant", لست "taste" and أيضا "metabolism".
+    expect((await word('ليس الطالب في البيت', 'ليس')).diacritized).toBe('لَيْسَ');
+    expect((await word('لست طالبا', 'لست')).diacritized).toBe('لَسْتُ');
+    expect(await word('أنا أيضا طالب', 'أيضا')).toMatchObject({ lemma: 'أَيْضاً', partOfSpeech: 'adv' });
+  });
+
+  it('keeps function words as they are, whatever the translation', async () => {
+    // "took" would otherwise match آلَى "take an oath" for إلى.
+    const to = await word('أخذ سامي ليلى إلى المركز الصحي', 'إلى', 'Sami took Layla to the health center');
+
+    expect([to.lemma, to.partOfSpeech]).toEqual(['إِلَى', 'prep']);
+  });
+
+  it('analyzes a sentence with its translation in milliseconds', async () => {
+    const started = performance.now();
+    for (let i = 0; i < 20; i++) {
+      await analyzer.analyze(`قرأت كتب كثيرة في المكتبة رقم ${i}`, 'I read many books in the library');
+    }
+    expect((performance.now() - started) / 20).toBeLessThan(50);
   });
 });
