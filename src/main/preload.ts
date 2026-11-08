@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('api', {
   checkApiKey: (name: string) => ipcRenderer.invoke('settings:checkApiKey', name),
   transcriptionFailure: (sessionId: number) => ipcRenderer.invoke('sessions:transcriptionFailure', sessionId),
   dictionaryNotice: () => ipcRenderer.invoke('credits:dictionaryNotice'),
+  exportToAnki: (target: unknown) => ipcRenderer.invoke('anki:export', target),
+  showExportedFile: (path: string) => ipcRenderer.invoke('anki:showInFolder', path),
   /** Live Sessions whose speech-to-text stopped; returns an unsubscribe. */
   onTranscriptionFailure: (listener: TranscriptionFailureListener) => {
     const handler = (_event: IpcRendererEvent, ...[id, message]: Parameters<TranscriptionFailureListener>) =>

@@ -1,6 +1,6 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, protocol, safeStorage, session, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, protocol, safeStorage, session, shell } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createApp, type App } from '../core/app';
 import { audioFileResponse } from '../core/audioFile';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
@@ -10,6 +10,7 @@ import { isApiKeyName, parseApiKey, parseAudioSettings, type SecretCodec } from 
 import { SqliteDictionary } from '../core/dictionary/sqlite';
 import type { ArabicAnalyzer, Dictionary } from '../core/providers';
 import { FakeArabicAnalyzer, FakeDictionary } from '../core/fakes';
+import type { AnkiExportResult, AnkiExportTarget } from '../core/types';
 
 const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
 
@@ -119,12 +120,30 @@ function dictionaryNotice(): string | null {
   }
 }
 
+function requireExportTarget(value: unknown): AnkiExportTarget {
+  const target = value as { kind?: unknown; sessionId?: unknown } | null;
+  if (target?.kind === 'vocabulary') return { kind: 'vocabulary' };
+  if (target?.kind === 'session') return { kind: 'session', sessionId: requireSessionId(target.sessionId) };
+  throw new Error('Invalid export');
+}
+
+/** The Arabic font Anki cards show the Lemma in: the renderer's own copy. */
+function ankiFontPath(): string {
+  const file = 'NotoNaskhArabic-Regular.woff2';
+  return app.isPackaged
+    ? join(process.resourcesPath, 'fonts', file)
+    : join(app.getAppPath(), 'src', 'renderer', 'fonts', file);
+}
+
+/** Files this run exported; "Show in folder" reveals only these. */
+const exportedFiles = new Set<string>();
+
 function requireKeyName(value: unknown) {
   if (!isApiKeyName(value)) throw new Error('Unknown API key');
   return value;
 }
 
-function registerIpc({ sessions, vocabulary, words, guides, settings, apiKeys }: App): void {
+function registerIpc({ sessions, vocabulary, words, guides, anki, settings, apiKeys }: App): void {
   // Every window hears every live Session; the renderer picks the one it shows.
   sessions.subscribe((sessionId, update) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -165,6 +184,26 @@ function registerIpc({ sessions, vocabulary, words, guides, settings, apiKeys }:
     (await words.details(requireLemmaId(lemmaId), optionalSurface(surface))) ?? null,
   );
   ipcMain.handle('guides:wordCard', (_event, lemmaId: unknown) => guides.wordCard(requireLemmaId(lemmaId)) ?? null);
+  // The learner picks where the deck goes; null when they cancel the Save dialog.
+  ipcMain.handle('anki:export', async (event, value: unknown): Promise<AnkiExportResult | null> => {
+    const target = requireExportTarget(value);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = {
+      title: 'Export to Anki',
+      defaultPath: join(app.getPath('documents'), anki.defaultFileName(target)),
+      filters: [{ name: 'Anki deck', extensions: ['apkg'] }],
+    };
+    const choice = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    if (choice.canceled || !choice.filePath) return null;
+    const path = resolve(choice.filePath);
+    const count = await anki.export(target, path);
+    exportedFiles.add(path);
+    return { count, path };
+  });
+  ipcMain.handle('anki:showInFolder', (_event, value: unknown) => {
+    if (typeof value !== 'string' || !exportedFiles.has(value)) throw new Error('Not an exported file');
+    shell.showItemInFolder(value);
+  });
   ipcMain.handle('settings:audio', () => settings.audio());
   ipcMain.handle('settings:setAudio', (_event, value: unknown) => {
     const audio = parseAudioSettings(value);
@@ -266,6 +305,7 @@ void app.whenReady().then(() => {
     keys: { env: process.env },
     // The word panel's modules are set in this file; they are not on the settings screen yet.
     detailModules: readDetailModuleConfig(join(dataDir, 'detail-modules.json')),
+    ankiFontPath: ankiFontPath(),
     providers: (keys) => ({
       speechToText: new KeyedSpeechToText(keys),
       translator: new KeyedTranslator(keys),

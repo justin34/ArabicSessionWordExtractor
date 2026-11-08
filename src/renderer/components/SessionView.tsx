@@ -1,6 +1,7 @@
 import type { ListedSession, SessionGuide, Utterance } from '../bridge';
 import { formatStart, sessionDuration } from '../format';
 import { ReplayView } from './ReplayView';
+import type { AnkiActions } from './AnkiExport';
 import { SessionGuideView } from './SessionGuideView';
 import type { LoadWordDetails } from './WordPanel';
 import './SessionView.css';
@@ -27,6 +28,7 @@ export function SessionView({
   loadGuide,
   onOpenWord,
   onBack,
+  anki,
 }: {
   session: ListedSession;
   tab: SessionTab;
@@ -39,6 +41,7 @@ export function SessionView({
   loadGuide: (sessionId: number) => Promise<SessionGuide | null>;
   onOpenWord: (lemmaId: number) => void;
   onBack: () => void;
+  anki: AnkiActions;
 }) {
   const lengthMs = session.endedAt
     ? new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()
@@ -91,7 +94,7 @@ export function SessionView({
           aria-labelledby="session-tab-guide"
           className="session-view__panel"
         >
-          <SessionGuideView sessionId={session.id} loadGuide={loadGuide} onOpenWord={onOpenWord} />
+          <SessionGuideView sessionId={session.id} loadGuide={loadGuide} onOpenWord={onOpenWord} anki={anki} />
         </div>
       )}
     </div>

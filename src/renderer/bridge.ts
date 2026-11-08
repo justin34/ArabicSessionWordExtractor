@@ -1,4 +1,6 @@
 import type {
+  AnkiExportResult,
+  AnkiExportTarget,
   ApiKeyCheck,
   ApiKeyName,
   ApiKeyStatus,
@@ -13,7 +15,7 @@ import type {
   WordDetails,
 } from '../core/types';
 
-export type { ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, LiveUtterance, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails };
+export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, LiveUtterance, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -54,6 +56,13 @@ export interface Bridge {
   checkApiKey(name: ApiKeyName): Promise<ApiKeyCheck>;
   /** The dictionary build's attribution notice; null when there is no dictionary. */
   dictionaryNotice(): Promise<string | null>;
+  /**
+   * Asks where to save, then writes an Anki deck of the target's words; null when the
+   * learner cancels. Rejects, leaving no file, when the deck cannot be written.
+   */
+  exportToAnki(target: AnkiExportTarget): Promise<AnkiExportResult | null>;
+  /** Shows an exported deck in the system's file manager. */
+  showExportedFile(path: string): Promise<void>;
   /** Live transcript for a real Session. */
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void): Unsubscribe;
   /** Why a live Session's speech-to-text has stopped; null while it works. */

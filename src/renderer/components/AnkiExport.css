@@ -1,0 +1,29 @@
+/* Confirmation or failure after "Export to Anki". */
+.anki-export {
+  position: relative;
+  margin-block-end: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  padding-inline-end: calc(var(--space-4) + 5rem);
+  border-radius: var(--radius-1);
+}
+.anki-export--done {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+.anki-export--failed {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+.anki-export__line {
+  margin: 0;
+}
+.anki-export__note {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.anki-export__dismiss {
+  position: absolute;
+  inset-block-start: var(--space-3);
+  inset-inline-end: var(--space-4);
+}

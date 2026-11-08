@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ApiKeyName,
   ApiKeyStatus,
@@ -15,6 +15,7 @@ import type {
   VocabularyEntry,
 } from './bridge';
 import { DeviceUnavailableError, NoDesktopAudioError } from './bridge';
+import type { AnkiActions } from './components/AnkiExport';
 import { CreditsView } from './components/CreditsView';
 import { LiveView } from './components/LiveView';
 import { ReplayPlaceholder } from './components/ReplayPlaceholder';
@@ -343,6 +344,13 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
   const saveApiKey = useCallback((name: ApiKeyName, key: string | null) => bridge.saveApiKey(name, key), [bridge]);
   const checkApiKey = useCallback((name: ApiKeyName) => bridge.checkApiKey(name), [bridge]);
   const loadDictionaryNotice = useCallback(() => bridge.dictionaryNotice(), [bridge]);
+  const anki = useMemo<AnkiActions>(
+    () => ({
+      exportToAnki: (target) => bridge.exportToAnki(target),
+      showExportedFile: (path) => bridge.showExportedFile(path),
+    }),
+    [bridge],
+  );
   const openWordCard = (lemmaId: number) => setRoute({ name: 'word-card', lemmaId, back: route });
 
   return (
@@ -394,6 +402,7 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
               loadGuide={loadSessionGuide}
               onOpenWord={openWordCard}
               onBack={goSessions}
+              anki={anki}
             />
           ))}
         {route.name === 'word-card' && (
@@ -410,6 +419,7 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
             query={vocabularyQuery}
             onQueryChange={setVocabularyQuery}
             onOpenWord={openWordCard}
+            anki={anki}
           />
         )}
         {route.name === 'settings' && (

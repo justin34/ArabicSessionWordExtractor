@@ -1,5 +1,6 @@
 import type { VocabularyEntry } from '../bridge';
 import { formatStart } from '../format';
+import { useAnkiExport, type AnkiActions } from './AnkiExport';
 import { matchesVocabulary } from '../vocabularySearch';
 import { EmptyState } from './EmptyState';
 import { ScreenHeader } from './ScreenHeader';
@@ -21,12 +22,16 @@ function heardSummary(e: VocabularyEntry): string {
   return `Heard ${times} in ${sessions === 1 ? '1 Session' : `${sessions} Sessions`}`;
 }
 
+/** "Export to Anki" here exports every Lemma. */
+const VOCABULARY = { kind: 'vocabulary' } as const;
+
 /** The Vocabulary: every Lemma heard, searchable by Arabic, root or English. */
 export function VocabularyList({
   entries,
   query,
   onQueryChange,
   onOpenWord,
+  anki,
 }: {
   /** Null while loading. */
   entries: VocabularyEntry[] | null;
@@ -34,7 +39,9 @@ export function VocabularyList({
   onQueryChange: (query: string) => void;
   /** Opens a Lemma's Word Card. */
   onOpenWord: (lemmaId: number) => void;
+  anki: AnkiActions;
 }) {
+  const ankiExport = useAnkiExport(anki, VOCABULARY);
   const shown = entries?.filter((e) => matchesVocabulary(e, query)) ?? [];
   return (
     <>
@@ -50,7 +57,9 @@ export function VocabularyList({
             onChange={(e) => onQueryChange(e.target.value)}
           />
         )}
+        {entries !== null && ankiExport.button(entries.length === 0)}
       </ScreenHeader>
+      {ankiExport.status}
       {entries === null ? null : entries.length === 0 ? (
         <EmptyState title="No words yet">
           Every word you hear in a Session collects here, by its dictionary form.

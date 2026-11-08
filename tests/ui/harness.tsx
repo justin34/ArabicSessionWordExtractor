@@ -2,6 +2,8 @@ import { render } from '@testing-library/react';
 import { App } from '../../src/renderer/App';
 import {
   DeviceUnavailableError,
+  type AnkiExportResult,
+  type AnkiExportTarget,
   type ApiKeyCheck,
   type ApiKeyName,
   type ApiKeyStatus,
@@ -65,6 +67,11 @@ export class FakeBridge implements Bridge {
   checkedKeys: ApiKeyName[] = [];
   apiKeysError: Error | null = null;
   notice: string | null = null;
+  /** Each export asked for; the Save dialog's answer is `exportResult` (null: cancelled). */
+  exports: AnkiExportTarget[] = [];
+  exportResult: AnkiExportResult | null = { count: 3, path: String.raw`C:\Users\me\Documents\arabic-vocabulary-2026-11-07.apkg` };
+  exportError: Error | null = null;
+  shownFiles: string[] = [];
   /** Why each Session's speech-to-text stopped, as the main process would say. */
   failures = new Map<number, string>();
   private listeners = new Map<number, (u: LiveUtterance) => void>();
@@ -166,6 +173,14 @@ export class FakeBridge implements Bridge {
   async checkApiKey(name: ApiKeyName): Promise<ApiKeyCheck> {
     this.checkedKeys.push(name);
     return this.keyChecks.get(name) ?? { ok: true, message: 'The service accepted the key.' };
+  }
+  async exportToAnki(target: AnkiExportTarget) {
+    this.exports.push(target);
+    if (this.exportError) throw this.exportError;
+    return this.exportResult;
+  }
+  async showExportedFile(path: string) {
+    this.shownFiles.push(path);
   }
   async dictionaryNotice() {
     return this.notice;

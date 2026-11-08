@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import type { SessionGuide } from '../bridge';
 import { useLoaded } from '../useLoaded';
+import { useAnkiExport, type AnkiActions } from './AnkiExport';
 import { EmptyState } from './EmptyState';
 import './StudyGuides.css';
 
@@ -20,13 +21,17 @@ export function SessionGuideView({
   sessionId,
   loadGuide,
   onOpenWord,
+  anki,
 }: {
   sessionId: number;
   loadGuide: (sessionId: number) => Promise<SessionGuide | null>;
   onOpenWord: (lemmaId: number) => void;
+  anki: AnkiActions;
 }) {
   const load = useCallback(() => loadGuide(sessionId), [loadGuide, sessionId]);
   const guide = useLoaded(load);
+  // Exports exactly the words this guide lists.
+  const ankiExport = useAnkiExport(anki, { kind: 'session', sessionId });
 
   let body;
   if (guide.state === 'loading') body = null;
@@ -36,16 +41,23 @@ export function SessionGuideView({
     body = <EmptyState title="No Session Guide yet">It is generated when the Session ends.</EmptyState>;
   else if (guide.value.groups.length === 0)
     body = (
-      <EmptyState title="No new words">
-        {guide.value.lemmasHeard > 0
-          ? 'Every word in this Session was already in your Vocabulary.'
-          : 'No words were heard in this Session.'}
-      </EmptyState>
+      <>
+        <div className="guide__toolbar">{ankiExport.button(true)}</div>
+        <EmptyState title="No new words">
+          {guide.value.lemmasHeard > 0
+            ? 'Every word in this Session was already in your Vocabulary.'
+            : 'No words were heard in this Session.'}
+        </EmptyState>
+      </>
     );
   else
     body = (
       <>
-        <p className="guide__summary">{summary(guide.value)}</p>
+        <div className="guide__toolbar">
+          <p className="guide__summary">{summary(guide.value)}</p>
+          {ankiExport.button(false)}
+        </div>
+        {ankiExport.status}
         {guide.value.groups.map((group) => (
           <section key={group.title} className="guide__group" aria-label={group.title}>
             <h2 className="guide__group-title">{group.title}</h2>

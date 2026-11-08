@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isArabicWord } from './analysis/align';
+import { AnkiExporter } from './anki/export';
 import { ApiKeys, type ApiKeysOptions } from './apiKeys';
 import { WordDetailsBuilder, type DetailModuleConfig } from './details/wordDetails';
 import { StudyGuides } from './guides/studyGuides';
@@ -8,7 +9,7 @@ import type { Providers } from './providers';
 import { Sessions } from './sessions';
 import { Settings, type SecretCodec } from './settings';
 import { Store } from './store';
-import type { SessionGuide, VocabularyEntry, WordCard, WordDetails } from './types';
+import type { AnkiExportTarget, SessionGuide, VocabularyEntry, WordCard, WordDetails } from './types';
 
 /** The Vocabulary, built by the Session pipeline as Utterances are analyzed. */
 export interface Vocabulary {
@@ -29,11 +30,20 @@ export interface Guides {
   idle(): Promise<void>;
 }
 
+/** "Export to Anki" (GLOSSARY: Anki export): one-way, and nothing is recorded about it. */
+export interface Anki {
+  /** The Save dialog's suggested file name. */
+  defaultFileName(target: AnkiExportTarget): string;
+  /** Writes the `.apkg` to `path`, whole or not at all; returns how many words it holds. */
+  export(target: AnkiExportTarget, path: string): Promise<number>;
+}
+
 export interface App {
   sessions: Sessions;
   vocabulary: Vocabulary;
   words: Words;
   guides: Guides;
+  anki: Anki;
   /** Stored settings, e.g. which audio devices to record from. */
   settings: Settings;
   /** The API keys in use, from Settings or the environment, and their checks. */
@@ -54,6 +64,8 @@ export interface AppOptions {
   detailModules?: DetailModuleConfig;
   /** How long analysis waits for an Utterance's translation; 3 s by default. */
   translationWaitMs?: number;
+  /** The Arabic font packaged with Anki exports, when it exists. */
+  ankiFontPath?: string;
 }
 
 /** Wires local storage and the providers into the Session pipeline. */
@@ -64,6 +76,7 @@ export function createApp({
   keys,
   detailModules,
   translationWaitMs,
+  ankiFontPath,
 }: AppOptions): App {
   mkdirSync(dataDir, { recursive: true });
   const settings = new Settings(join(dataDir, 'settings.json'), secrets);
@@ -86,9 +99,14 @@ export function createApp({
     sessionGuide: (sessionId) => studyGuides.sessionGuide(sessionId),
     idle: () => studyGuides.idle(),
   };
+  const exporter = new AnkiExporter(store, providers.dictionary, { fontPath: ankiFontPath });
+  const anki: Anki = {
+    defaultFileName: (target) => exporter.defaultFileName(target),
+    export: (target, path) => exporter.export(target, path),
+  };
   const close = () => {
     studyGuides.stop();
     store.close();
   };
-  return { sessions, vocabulary, words, guides, settings, apiKeys, close };
+  return { sessions, vocabulary, words, guides, anki, settings, apiKeys, close };
 }
