@@ -57,9 +57,12 @@ export interface TokenAnalysis {
   suffixes?: Clitic[];
 }
 
-/** Arabic analysis: a whole final sentence in, one analysis per Token out. */
+/**
+ * Arabic analysis: a whole final sentence in, one analysis per Token out. The sentence's
+ * English translation, when there is one, helps pick each word's reading.
+ */
 export interface ArabicAnalyzer {
-  analyze(sentence: string): Promise<TokenAnalysis[]>;
+  analyze(sentence: string, translation?: string): Promise<TokenAnalysis[]>;
 }
 
 export interface DictionaryEntry {

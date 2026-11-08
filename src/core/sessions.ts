@@ -41,16 +41,26 @@ interface FinalUtterance {
   current: LiveUtterance;
 }
 
+/** How long analysis waits for an Utterance's translation before going on without it. */
+const DEFAULT_TRANSLATION_WAIT_MS = 3000;
+
+export interface SessionsOptions {
+  /** How long analysis waits for an Utterance's translation; 3 s by default. */
+  translationWaitMs?: number;
+}
+
 /**
  * The Session pipeline. Desktop audio streamed into a live Session is written to its
  * Desktop Track and, at the same time, fed to speech-to-text; each final Utterance is
- * stored in the Session's Transcript and shown at once, then translated and analyzed
- * alongside. Analysis resolves its words to Lemmas, which go into the Vocabulary.
+ * stored in the Session's Transcript and shown at once, then translated and analyzed.
+ * Analysis waits briefly for the translation, which helps it pick each word's reading,
+ * and resolves the words to Lemmas, which go into the Vocabulary.
  */
 export class Sessions {
   private readonly live = new Map<number, LiveSession>();
   private readonly listeners = new Set<TranscriptListener>();
   private readonly failureListeners = new Set<TranscriptionFailureListener>();
+  private readonly translationWaitMs: number;
 
   constructor(
     private readonly store: Store,
@@ -58,7 +68,9 @@ export class Sessions {
     private readonly recordingsDir: string,
     /** Told of Lemmas heard and Sessions ended, for Word Cards and Session Guides. */
     private readonly guides?: StudyGuideHooks,
+    { translationWaitMs = DEFAULT_TRANSLATION_WAIT_MS }: SessionsOptions = {},
   ) {
+    this.translationWaitMs = translationWaitMs;
     mkdirSync(recordingsDir, { recursive: true });
     // No Session can still be live when the app opens; any left recording died with the app.
     store.completeAbandonedSessions(new Date().toISOString());
@@ -235,7 +247,9 @@ export class Sessions {
         // An Utterance of Foreign words only stays in the Transcript, untranslated and unanalyzed.
         if (!hasArabicWord(event.text)) continue;
         // Neither holds up the next Utterance's speech-to-text.
-        for (const work of [this.translate(utterance), this.analyze(utterance)]) {
+        const translated = this.translate(utterance);
+        const analyzed = this.analyze(utterance, this.withinWait(translated));
+        for (const work of [translated.then(() => {}), analyzed]) {
           const followUp = work.finally(() => live.followUps.delete(followUp));
           live.followUps.add(followUp);
         }
@@ -270,29 +284,45 @@ export class Sessions {
     this.emit(u.sessionId, u.current);
   }
 
-  /** Adds the sentence translation to a final Utterance. A failure leaves it untranslated. */
-  private async translate(u: FinalUtterance): Promise<void> {
+  /**
+   * Adds the sentence translation to a final Utterance, and resolves to it. A failure
+   * leaves the Utterance untranslated and resolves to ''.
+   */
+  private async translate(u: FinalUtterance): Promise<string> {
     try {
       const translation = await this.providers.translator.translate(u.current.text);
-      if (!translation) return;
+      if (!translation) return '';
       this.store.setTranslation(u.utteranceId, translation);
       this.update(u, { translation });
+      return translation;
     } catch (err) {
       console.error(`Translation failed for an Utterance in Session ${u.sessionId}:`, err);
       // The Arabic stays as it is; Live View warns that translation is not working.
       this.update(u, { translationError: (err as Error).message || String(err) });
+      return '';
     }
   }
 
+  /** The translation if it arrives within the wait, else ''. */
+  private withinWait(translated: Promise<string>): Promise<string> {
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve(''), this.translationWaitMs);
+    });
+    return Promise.race([translated, late]).finally(() => clearTimeout(timer));
+  }
+
   /**
-   * Resolves a final Utterance's words to Lemmas and adds them to the Vocabulary. A
-   * failure leaves its words out of the Vocabulary and its Tokens without Lemmas.
+   * Resolves a final Utterance's words to Lemmas and adds them to the Vocabulary, once
+   * its translation is in (or given up on). A failure leaves its words out of the
+   * Vocabulary and its Tokens without Lemmas.
    */
-  private async analyze(u: FinalUtterance): Promise<void> {
+  private async analyze(u: FinalUtterance, translation: Promise<string>): Promise<void> {
     try {
-      const analyzed = (await this.providers.arabicAnalyzer.analyze(u.current.text)).filter((a) =>
-        isWord(a.surface),
-      );
+      const english = await translation;
+      const analyzed = (
+        await this.providers.arabicAnalyzer.analyze(u.current.text, english || undefined)
+      ).filter((a) => isWord(a.surface));
       const tokens = u.current.tokens;
       const aligned = alignToTokens(analyzed, tokens);
       // Foreign words never enter the Vocabulary. A word is judged by the whole Token it
