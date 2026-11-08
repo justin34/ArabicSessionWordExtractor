@@ -7,6 +7,7 @@ import {
   type DesktopAudioCapture,
   type MicAudioCapture,
 } from './bridge';
+import { levelOf, MicGate } from './micGate';
 
 /** Opens one input device, or the default one. Throws DeviceUnavailableError when it is gone. */
 async function openInput(device: AudioDevice | null, constraints: MediaTrackConstraints = {}): Promise<MediaStream> {
@@ -24,45 +25,75 @@ async function openInput(device: AudioDevice | null, constraints: MediaTrackCons
   }
 }
 
-/** Records an audio stream with MediaRecorder (WebM/Opus), metering its level. */
-function recorderCapture(stream: MediaStream): AudioCapture {
+/** One MediaRecorder (WebM/Opus) delivering its chunks in order. */
+function startRecorder(stream: MediaStream, onChunk: (chunk: Uint8Array) => void): () => Promise<void> {
+  const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+  // Blob reads are async; chain them so chunks are delivered in order.
+  let delivery: Promise<void> = Promise.resolve();
+  recorder.ondataavailable = (event) => {
+    if (event.data.size === 0) return;
+    delivery = delivery.then(async () => {
+      onChunk(new Uint8Array(await event.data.arrayBuffer()));
+    });
+  };
+  recorder.start(1000);
+  return async () => {
+    if (recorder.state !== 'inactive') {
+      await new Promise<void>((resolve) => {
+        recorder.onstop = () => resolve();
+        recorder.stop();
+      });
+    }
+    await delivery;
+  };
+}
+
+/**
+ * Records an audio stream with MediaRecorder (WebM/Opus), metering its level. With a
+ * `threshold`, a second recorder takes the same audio through the mic threshold's gate:
+ * the same timeline, with what the gate shuts out replaced by silence, so speech-to-text
+ * times still match the recording, which itself is never gated.
+ */
+function recorderCapture(stream: MediaStream, threshold?: number): AudioCapture {
   const release = () => stream.getTracks().forEach((t) => t.stop());
   const audioContext = new AudioContext();
   const analyser = audioContext.createAnalyser();
   analyser.fftSize = 512;
-  audioContext.createMediaStreamSource(stream).connect(analyser);
-  const samples = new Uint8Array(analyser.fftSize);
+  const source = audioContext.createMediaStreamSource(stream);
+  source.connect(analyser);
+  const samples = new Float32Array(analyser.fftSize);
 
-  let recorder: MediaRecorder | null = null;
-  // Blob reads are async; chain them so chunks are delivered in order.
-  let delivery: Promise<void> = Promise.resolve();
+  let gated: MediaStream | null = null;
+  if (threshold !== undefined) {
+    const gate = new MicGate(threshold);
+    // A ScriptProcessorNode keeps the gate in this file: an AudioWorklet would need a
+    // module of its own loaded into the page.
+    const processor = audioContext.createScriptProcessor(1024, 1, 1);
+    processor.onaudioprocess = (event) =>
+      void gate.process(
+        event.inputBuffer.getChannelData(0),
+        event.outputBuffer.getChannelData(0),
+        event.inputBuffer.sampleRate,
+      );
+    const destination = audioContext.createMediaStreamDestination();
+    source.connect(processor).connect(destination);
+    gated = destination.stream;
+  }
+
+  const stops: Array<() => Promise<void>> = [];
 
   return {
-    begin(onChunk) {
-      recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-      recorder.ondataavailable = (event) => {
-        if (event.data.size === 0) return;
-        delivery = delivery.then(async () => {
-          onChunk(new Uint8Array(await event.data.arrayBuffer()));
-        });
-      };
-      recorder.start(1000);
+    begin(onChunk, onGatedChunk) {
+      // Both recorders start together, so the gated audio keeps the recording's timeline.
+      stops.push(startRecorder(stream, onChunk));
+      if (gated && onGatedChunk) stops.push(startRecorder(gated, onGatedChunk));
     },
     level() {
-      analyser.getByteTimeDomainData(samples);
-      let peak = 0;
-      for (const s of samples) peak = Math.max(peak, Math.abs(s - 128));
-      return Math.min(1, (peak / 128) * 2);
+      analyser.getFloatTimeDomainData(samples);
+      return levelOf(samples);
     },
     async stop() {
-      const rec = recorder;
-      if (rec && rec.state !== 'inactive') {
-        await new Promise<void>((resolve) => {
-          rec.onstop = () => resolve();
-          rec.stop();
-        });
-      }
-      await delivery;
+      await Promise.all(stops.map((stop) => stop()));
       release();
       await audioContext.close().catch(() => undefined);
     },
@@ -94,10 +125,10 @@ export const browserDesktopAudio: DesktopAudioCapture = {
   },
 };
 
-/** Records the chosen (or default) microphone, for a Session's Mic Track. */
+/** Records the chosen (or default) microphone, for a Session's Mic Track, gated with a threshold. */
 export const browserMicAudio: MicAudioCapture = {
-  async open(device = null): Promise<AudioCapture> {
-    return recorderCapture(await openInput(device));
+  async open(device = null, threshold?: number): Promise<AudioCapture> {
+    return recorderCapture(await openInput(device), threshold);
   },
 };
 

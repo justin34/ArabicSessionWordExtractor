@@ -23,6 +23,13 @@ export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKe
 
 export type Unsubscribe = () => void;
 
+/** What a Session records and transcribes, as chosen in the Start panel and Settings. */
+export interface StartOptions {
+  mic: boolean;
+  transcribeMic?: boolean;
+  gateMic?: boolean;
+}
+
 /**
  * The renderer's whole view of the outside world. The real implementation wraps the
  * preload bridge; tests substitute a fake.
@@ -30,12 +37,15 @@ export type Unsubscribe = () => void;
 export interface Bridge {
   /**
    * With `mic`, the Session also records a Mic Track; with `transcribeMic` as well, that
-   * Track is transcribed as Learner Utterances.
+   * Track is transcribed as Learner Utterances, and with `gateMic` too, speech-to-text
+   * hears only the gated audio sent with `appendGatedMicAudio`.
    */
-  startSession(options?: { mic: boolean; transcribeMic?: boolean }): Promise<Session>;
+  startSession(options?: StartOptions): Promise<Session>;
   appendDesktopAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
   /** Writes to the Session's Mic Track; transcribed only when the Session was started so. */
   appendMicAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
+  /** Sends mic audio gated by the mic threshold to speech-to-text; never recorded. */
+  appendGatedMicAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
   stopSession(sessionId: number): Promise<Session>;
   listSessions(): Promise<Session[]>;
   /** A Session's stored Transcript, in order. */
@@ -101,8 +111,11 @@ export class NoDesktopAudioError extends Error {
 
 /** An open audio capture (desktop or microphone) that is not recording yet. */
 export interface AudioCapture {
-  /** Begin recording; chunks are delivered in order. */
-  begin(onChunk: (chunk: Uint8Array) => void): void;
+  /**
+   * Begin recording; chunks are delivered in order. A microphone opened with a threshold
+   * also records the gated audio, on the same timeline, for `onGatedChunk`.
+   */
+  begin(onChunk: (chunk: Uint8Array) => void, onGatedChunk?: (chunk: Uint8Array) => void): void;
   /** Current input level, 0 to 1. */
   level(): number;
   /** Stop, deliver any final chunk, and release the capture. */
@@ -127,8 +140,12 @@ export interface DesktopAudioCapture {
 
 /** Opens the microphone for a Session's Mic Track. Throws when it cannot be opened. */
 export interface MicAudioCapture {
-  /** The default microphone when `device` is null; DeviceUnavailableError when it is not connected. */
-  open(device?: AudioDevice | null): Promise<AudioCapture>;
+  /**
+   * The default microphone when `device` is null; DeviceUnavailableError when it is not
+   * connected. With a `threshold`, it also records a gated copy for speech-to-text: audio
+   * below the threshold silenced, held open briefly after the level falls (see micGate).
+   */
+  open(device?: AudioDevice | null, threshold?: number): Promise<AudioCapture>;
 }
 
 /** The system's audio input devices (microphones, Stereo Mix, virtual cables). */

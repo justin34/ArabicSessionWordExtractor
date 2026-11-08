@@ -51,6 +51,23 @@ describe('Audio settings', () => {
     expect(parseAudioSettings({ desktopSource: { deviceId: '', label: 'x' } })).toBeUndefined();
     expect(parseAudioSettings({ microphone: { deviceId: 'a', label: 'x'.repeat(501) } })).toBeUndefined();
   });
+
+  it('keep a mic threshold between 0 and 1; absent, null or 0 is off', () => {
+    const devices = { desktopSource: null, microphone: headset };
+    expect(parseAudioSettings({ ...devices, micThreshold: 0.25 })).toEqual({ ...devices, micThreshold: 0.25 });
+    expect(parseAudioSettings({ ...devices, micThreshold: 1 })).toEqual({ ...devices, micThreshold: 1 });
+    for (const off of [undefined, null, 0]) {
+      expect(parseAudioSettings({ ...devices, micThreshold: off })).toStrictEqual(devices);
+    }
+    for (const bad of [-0.1, 1.5, '0.2', Number.NaN]) {
+      expect(parseAudioSettings({ ...devices, micThreshold: bad })).toBeUndefined();
+    }
+  });
+
+  it('save the mic threshold in settings.json with the devices', () => {
+    new Settings(path).setAudio({ desktopSource: null, microphone: headset, micThreshold: 0.3 });
+    expect(new Settings(path).audio()).toEqual({ desktopSource: null, microphone: headset, micThreshold: 0.3 });
+  });
 });
 
 describe('Replay layout', () => {

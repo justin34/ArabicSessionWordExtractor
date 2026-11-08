@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ApiKeyName, ApiKeyStatus, AudioSettings } from '../bridge';
+import { formatThreshold } from '../micGate';
 import './StartPanel.css';
 
 /** Whether a speech-to-text key is set; true while the keys load, so nothing is disabled for nothing. */
@@ -86,7 +87,13 @@ export function StartPanel({
           />
           <label htmlFor="mic-option">Also record my microphone</label>
           <span id="mic-note" className="modal__note">
-            {devices && <>From {devices.microphone?.label ?? 'the default microphone'}. </>}
+            {devices && (
+              <>
+                From {devices.microphone?.label ?? 'the default microphone'}
+                {devices.micThreshold !== undefined && <>, mic threshold {formatThreshold(devices.micThreshold)}</>}
+                .{' '}
+              </>
+            )}
             Saved as a separate track that plays alongside in Replay.
           </span>
           <div className="modal__option modal__option--nested">

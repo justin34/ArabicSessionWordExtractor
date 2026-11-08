@@ -3,6 +3,7 @@ import type {
   ApiKeyName,
   ApiKeyStatus,
   AudioCapture,
+  AudioDevice,
   AudioInputs,
   AudioSettings,
   Bridge,
@@ -66,6 +67,8 @@ interface ActiveRecording {
   /** Serializes each track's writes so chunks reach the main process in order. Never reject. */
   writes: Promise<void>;
   micWrites: Promise<void>;
+  /** What the mic threshold let through to speech-to-text, in order. */
+  gatedMicWrites: Promise<void>;
   writeError: Error | null;
 }
 
@@ -257,10 +260,12 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
       );
       return;
     }
+    // The mic threshold gates only what speech-to-text hears, so only a transcribed mic needs it.
+    const threshold = withMic && transcribeMic ? devices.micThreshold : undefined;
     let mic: AudioCapture | null = null;
     if (withMic) {
       try {
-        mic = await micCapture.open(devices.microphone);
+        mic = await micCapture.open(devices.microphone, threshold);
       } catch (err) {
         starting.current = false;
         await audio.stop().catch(() => undefined);
@@ -272,7 +277,13 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
     try {
       // Learner Utterances are asked for only when the learner ticked it (ADR 0004).
       const created = await bridge.startSession(
-        mic !== null && transcribeMic ? { mic: true, transcribeMic: true } : { mic: mic !== null },
+        mic === null
+          ? { mic: false }
+          : {
+              mic: true,
+              ...(transcribeMic ? { transcribeMic: true } : {}),
+              ...(threshold !== undefined ? { gateMic: true } : {}),
+            },
       );
       createdId = created.id;
       const rec: ActiveRecording = {
@@ -281,6 +292,7 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
         mic,
         writes: Promise.resolve(),
         micWrites: Promise.resolve(),
+        gatedMicWrites: Promise.resolve(),
         writeError: null,
       };
       const write = async (append: () => Promise<void>) => {
@@ -294,9 +306,16 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
       audio.begin((chunk) => {
         rec.writes = rec.writes.then(() => write(() => bridge.appendDesktopAudio(created.id, chunk)));
       });
-      mic?.begin((chunk) => {
+      const recordMic = (chunk: Uint8Array) => {
         rec.micWrites = rec.micWrites.then(() => write(() => bridge.appendMicAudio(created.id, chunk)));
-      });
+      };
+      // Gated audio only feeds speech-to-text: losing a chunk of it loses no recording.
+      const sendGatedMic = (chunk: Uint8Array) => {
+        rec.gatedMicWrites = rec.gatedMicWrites.then(() =>
+          bridge.appendGatedMicAudio(created.id, chunk).catch(() => undefined),
+        );
+      };
+      mic?.begin(recordMic, threshold === undefined ? undefined : sendGatedMic);
       active.current = rec;
       setActiveId(created.id);
       await refresh();
@@ -332,7 +351,7 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
     try {
       if (rec) {
         await Promise.all([rec.capture.stop(), rec.mic?.stop()]);
-        await Promise.all([rec.writes, rec.micWrites]);
+        await Promise.all([rec.writes, rec.micWrites, rec.gatedMicWrites]);
       }
       await bridge.stopSession(session.id);
       if (rec?.writeError) {
@@ -416,6 +435,7 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
   const loadAudioSettings = useCallback(() => bridge.audioSettings(), [bridge]);
   const saveAudioSettings = useCallback((s: AudioSettings) => bridge.saveAudioSettings(s), [bridge]);
   const listAudioInputs = useCallback(() => audioInputs.list(), [audioInputs]);
+  const openMicMeter = useCallback((device: AudioDevice | null) => micCapture.open(device), [micCapture]);
   const loadApiKeys = useCallback(() => bridge.apiKeys(), [bridge]);
   const saveApiKey = useCallback((name: ApiKeyName, key: string | null) => bridge.saveApiKey(name, key), [bridge]);
   const checkApiKey = useCallback((name: ApiKeyName) => bridge.checkApiKey(name), [bridge]);
@@ -519,6 +539,7 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
             loadSettings={loadAudioSettings}
             saveSettings={saveAudioSettings}
             listDevices={listAudioInputs}
+            openMeter={openMicMeter}
             loadKeys={loadApiKeys}
             saveKey={saveApiKey}
             checkKey={checkApiKey}

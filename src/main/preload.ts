@@ -2,11 +2,13 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { ReadyUpdate, TranscriptionFailureListener, TranscriptListener } from '../core/types';
 
 contextBridge.exposeInMainWorld('api', {
-  startSession: (options?: { mic: boolean; transcribeMic?: boolean }) => ipcRenderer.invoke('sessions:start', options),
+  startSession: (options?: { mic: boolean; transcribeMic?: boolean; gateMic?: boolean }) => ipcRenderer.invoke('sessions:start', options),
   appendDesktopAudio: (sessionId: number, chunk: Uint8Array) =>
     ipcRenderer.invoke('sessions:appendDesktopAudio', sessionId, chunk),
   appendMicAudio: (sessionId: number, chunk: Uint8Array) =>
     ipcRenderer.invoke('sessions:appendMicAudio', sessionId, chunk),
+  appendGatedMicAudio: (sessionId: number, chunk: Uint8Array) =>
+    ipcRenderer.invoke('sessions:appendGatedMicAudio', sessionId, chunk),
   stopSession: (sessionId: number) => ipcRenderer.invoke('sessions:stop', sessionId),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   transcript: (sessionId: number) => ipcRenderer.invoke('sessions:transcript', sessionId),

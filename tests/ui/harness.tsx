@@ -18,6 +18,7 @@ import {
   type LiveUtterance,
   type MicAudioCapture,
   type ReplayLayout,
+  type StartOptions,
   type Track,
 } from '../../src/renderer/bridge';
 import type { BundleProblem, ReadyUpdate } from '../../src/core/types';
@@ -40,8 +41,10 @@ export class FakeBridge implements Bridge {
   calls: string[] = [];
   chunks: Array<{ sessionId: number; chunk: Uint8Array }> = [];
   micChunks: Array<{ sessionId: number; chunk: Uint8Array }> = [];
+  /** What the mic threshold let through to speech-to-text. */
+  gatedMicChunks: Array<{ sessionId: number; chunk: Uint8Array }> = [];
   /** The options each startSession call was given, in order. */
-  startOptions: Array<{ mic: boolean; transcribeMic?: boolean } | undefined> = [];
+  startOptions: Array<StartOptions | undefined> = [];
   appendError: Error | null = null;
   vocabulary: VocabularyEntry[] = [];
   /** Word panel content by Lemma id. */
@@ -97,7 +100,7 @@ export class FakeBridge implements Bridge {
     this.nextId = Math.max(0, ...initial.map((s) => s.id)) + 1;
   }
 
-  async startSession(options?: { mic: boolean; transcribeMic?: boolean }) {
+  async startSession(options?: StartOptions) {
     this.startOptions.push(options);
     const id = this.nextId++;
     const s = session({
@@ -118,6 +121,9 @@ export class FakeBridge implements Bridge {
   async appendMicAudio(sessionId: number, chunk: Uint8Array) {
     if (this.appendError) throw this.appendError;
     this.micChunks.push({ sessionId, chunk });
+  }
+  async appendGatedMicAudio(sessionId: number, chunk: Uint8Array) {
+    this.gatedMicChunks.push({ sessionId, chunk });
   }
   async stopSession(sessionId: number) {
     this.calls.push(`stop:${sessionId}`);
@@ -256,20 +262,26 @@ export class FakeCapture implements DesktopAudioCapture, MicAudioCapture {
   stopped = 0;
   /** The device each open asked for; null is the system's own. */
   openedWith: Array<AudioDevice | null> = [];
+  /** The mic threshold each open asked for; undefined is none. */
+  thresholds: Array<number | undefined> = [];
   /** Device ids that are not connected. */
   unplugged = new Set<string>();
   onChunk: ((c: Uint8Array) => void) | null = null;
+  /** Where a capture opened with a threshold delivers its gated audio. */
+  onGatedChunk: ((c: Uint8Array) => void) | null = null;
 
-  async open(device: AudioDevice | null = null): Promise<AudioCapture> {
+  async open(device: AudioDevice | null = null, threshold?: number): Promise<AudioCapture> {
     this.openedWith.push(device);
+    this.thresholds.push(threshold);
     if (device && this.unplugged.has(device.deviceId)) throw new DeviceUnavailableError(device);
     if (this.noAudio) throw new NoDesktopAudioError();
     if (this.openError) throw this.openError;
     this.opened++;
     return {
-      begin: (onChunk) => {
+      begin: (onChunk, onGatedChunk) => {
         if (this.beginError) throw this.beginError;
         this.onChunk = onChunk;
+        this.onGatedChunk = onGatedChunk ?? null;
       },
       level: () => this.levelValue,
       stop: async () => {
