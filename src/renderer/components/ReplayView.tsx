@@ -42,7 +42,8 @@ export function ReplayView({
 }) {
   const load = useCallback(() => loadTranscript(sessionId), [loadTranscript, sessionId]);
   const transcript = useLoaded(load);
-  const utterances = transcript.state === 'loaded' ? transcript.value : [];
+  // Replay shows the teacher's Transcript; Learner Utterances join it with Together · Separate (#43).
+  const utterances = transcript.state === 'loaded' ? transcript.value.filter((u) => u.track !== 'mic') : [];
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const micRef = useRef<HTMLAudioElement>(null);

@@ -29,6 +29,9 @@
   --color-demo: #6a4bb3;
   --color-demo-bg: #ece6f9;
   --color-interim: #8a877e;
+  /* Learner Utterances (the learner's own speech) */
+  --color-learner: #2b5d9b;
+  --color-learner-bg: #ebf1f9;
 
   /* Spacing */
   --space-1: 4px;
@@ -81,6 +84,8 @@
     --color-demo: #b9a3ee;
     --color-demo-bg: #2c2545;
     --color-interim: #8d8a80;
+    --color-learner: #9cc2f0;
+    --color-learner-bg: #1c2633;
   }
 }
 

@@ -10,10 +10,17 @@ function ArabicText({ text }: { text: string }) {
   );
 }
 
+/** Marks a Learner Utterance: the learner's own speech, never analyzed (ADR 0004). */
+function LearnerLabel() {
+  return <span className="utterance__speaker">You</span>;
+}
+
 /**
  * One Utterance: muted Arabic while interim; once final, word columns with their glosses
  * (plain Arabic until glosses exist) plus the sentence translation. Each Arabic word column
  * opens the word panel when clicked; a Foreign word shows as heard, with no gloss or click.
+ * A Learner Utterance is marked "You" in its own tint: plain Arabic and its translation,
+ * with no glosses and no word panel.
  */
 export function UtteranceView({
   utterance,
@@ -39,6 +46,23 @@ export function UtteranceView({
     onSeek: () => void;
   };
 }) {
+  if (utterance.track === 'mic') {
+    return (
+      <article
+        className={utterance.isFinal ? 'utterance utterance--learner' : 'utterance utterance--learner utterance--interim'}
+        data-state={utterance.isFinal ? 'final' : 'interim'}
+        data-track="mic"
+      >
+        <LearnerLabel />
+        <ArabicText text={utterance.text} />
+        {utterance.isFinal && utterance.translation && (
+          <p className="utterance__translation" dir="ltr">
+            {utterance.translation}
+          </p>
+        )}
+      </article>
+    );
+  }
   if (!utterance.isFinal) {
     return (
       <article className="utterance utterance--interim" data-state="interim">

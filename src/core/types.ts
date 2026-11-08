@@ -6,9 +6,15 @@ export interface Session {
   endedAt: string | null;
   status: SessionStatus;
   desktopTrackPath: string;
-  /** The optional Mic Track, chosen at Session start; never transcribed. Null without one. */
+  /** The optional Mic Track, chosen at Session start; transcribed only when asked. Null without one. */
   micTrackPath: string | null;
 }
+
+/**
+ * Which audio track an Utterance was heard on (ADR 0004): the Desktop Track (the teacher,
+ * a video) or the Mic Track (the learner, as Learner Utterances).
+ */
+export type Track = 'desktop' | 'mic';
 
 /** One word occurrence in an Utterance. */
 export interface Token {
@@ -30,6 +36,8 @@ export interface Utterance {
   endMs: number;
   /** Empty while the Utterance is interim, and until the real pipeline produces Tokens. */
   tokens: Token[];
+  /** Where it was heard; 'mic' is a Learner Utterance, never analyzed. Stored ones from before are 'desktop'. */
+  track: Track;
 }
 
 /**
@@ -48,6 +56,10 @@ export interface LiveUtterance {
   tokens: Token[];
   /** Why this final Utterance could not be translated; set from the update reporting it on. */
   translationError?: string;
+  /** Where it was heard; absent means the Desktop Track. 'mic' is a Learner Utterance. */
+  track?: Track;
+  /** When it starts, from the start of its Track; Live View interleaves the Tracks by it. */
+  startMs?: number;
 }
 
 /** Where a Lemma was heard: one Utterance of one Session. */
@@ -106,8 +118,11 @@ export interface ApiKeyStatus {
  */
 export type ApiKeyCheck = { ok: true; message: string } | { ok: false; problem: 'invalid' | 'unreachable' | 'missing'; message: string };
 
-/** Sent when a live Session's speech-to-text stops; its audio keeps recording. */
-export type TranscriptionFailureListener = (sessionId: number, message: string) => void;
+/**
+ * Sent when a live Session's speech-to-text stops on one Track; its audio keeps recording,
+ * and the other Track's stream carries on.
+ */
+export type TranscriptionFailureListener = (sessionId: number, message: string, track: Track) => void;
 
 export type TranscriptListener = (sessionId: number, update: LiveUtterance) => void;
 

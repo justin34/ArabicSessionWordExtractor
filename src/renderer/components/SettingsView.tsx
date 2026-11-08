@@ -116,7 +116,7 @@ export function SettingsView({
                   ))}
                 </select>
                 <p id="microphone-note" className="settings__note">
-                  Used when a Session also records the microphone. It is never transcribed.
+                  Used when a Session also records the microphone. It is transcribed only when you ask at the start.
                 </p>
               </div>
               <button type="button" className="btn" onClick={refreshDevices}>

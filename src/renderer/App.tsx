@@ -13,6 +13,7 @@ import type {
   MicAudioCapture,
   LiveUtterance,
   ReadyUpdate,
+  Track,
   Unsubscribe,
   VocabularyEntry,
 } from './bridge';
@@ -88,6 +89,8 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
   const [startKeys, setStartKeys] = useState<ApiKeyStatus[] | null>(null);
   /** Why speech-to-text stopped, by Session key; its audio keeps recording. */
   const [transcriptionFailures, setTranscriptionFailures] = useState<Record<string, string>>({});
+  /** Why the Mic Track's speech-to-text stopped, by Session key; the rest carries on. */
+  const [micTranscriptionFailures, setMicTranscriptionFailures] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [vocabulary, setVocabulary] = useState<VocabularyEntry[] | null>(null);
@@ -147,13 +150,20 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
     (sessionId: number): Unsubscribe => {
       const key = String(sessionId);
       let current = true;
-      const fail = (message: string) =>
-        current && setTranscriptionFailures((f) => (f[key] === message ? f : { ...f, [key]: message }));
+      const fail = (message: string, track: Track = 'desktop') =>
+        current &&
+        (track === 'mic' ? setMicTranscriptionFailures : setTranscriptionFailures)((f) =>
+          f[key] === message ? f : { ...f, [key]: message },
+        );
       const offUpdates = bridge.subscribeTranscript(sessionId, (u) => pushUpdate(key, u));
       const offFailures = bridge.subscribeTranscriptionFailure(sessionId, fail);
       bridge
         .transcriptionFailure(sessionId)
         .then((message) => message && fail(message))
+        .catch(() => undefined);
+      bridge
+        .transcriptionFailure(sessionId, 'mic')
+        .then((message) => message && fail(message, 'mic'))
         .catch(() => undefined);
       return () => {
         current = false;
@@ -200,7 +210,13 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
 
   const now = useNow(sessions.some((s) => s.status === 'recording'));
 
-  async function startRecording({ mic: withMic }: { mic: boolean }): Promise<void> {
+  async function startRecording({
+    mic: withMic,
+    transcribeMic = false,
+  }: {
+    mic: boolean;
+    transcribeMic?: boolean;
+  }): Promise<void> {
     if (starting.current || active.current) return;
     starting.current = true;
     setStartPanelOpen(false);
@@ -232,7 +248,10 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
     }
     let createdId: number | null = null;
     try {
-      const created = await bridge.startSession({ mic: mic !== null });
+      // Learner Utterances are asked for only when the learner ticked it (ADR 0004).
+      const created = await bridge.startSession(
+        mic !== null && transcribeMic ? { mic: true, transcribeMic: true } : { mic: mic !== null },
+      );
       createdId = created.id;
       const rec: ActiveRecording = {
         sessionId: created.id,
@@ -430,6 +449,7 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
             utterances={transcripts[route.sessionKey] ?? []}
             getLevel={liveSession.isDemo ? undefined : getLevel}
             transcriptionFailure={transcriptionFailures[route.sessionKey]}
+            micTranscriptionFailure={micTranscriptionFailures[route.sessionKey]}
             onStop={() => void stopSession(liveSession)}
             onBack={goSessions}
             loadWordDetails={loadWordDetails}

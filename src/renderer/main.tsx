@@ -27,8 +27,8 @@ const bridge: Bridge = {
       if (id === sessionId) onUpdate(update);
     }),
   subscribeTranscriptionFailure: (sessionId, onFailure) =>
-    onTranscriptionFailure((id, message) => {
-      if (id === sessionId) onFailure(message);
+    onTranscriptionFailure((id, message, track) => {
+      if (id === sessionId) onFailure(message, track ?? 'desktop');
     }),
 };
 

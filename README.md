@@ -14,7 +14,7 @@ When the recording stops, the app keeps it: you can replay the audio and follow 
 - **Vocabulary.** Every word you hear is filed under its dictionary form (Lemma), with the spellings you heard, how often you heard it and when you first heard it. You can search it in Arabic or English, by root, with or without vowel marks.
 - **Study guides.** Each word gets a Word Card. Each recording gets a Session Guide that lists the words new to you, grouped by part of speech.
 - **Replay.** Play a past Session while the current word is highlighted. Click a sentence to jump to it.
-- **Optional microphone track.** Record your own voice too, as a separate track. It plays back in sync and is never transcribed.
+- **Optional microphone track.** Record your own voice too, as a separate track that plays back in sync. Ask for it to be transcribed and Live View shows what you said, marked **You** and translated, but never added to your vocabulary.
 - **Anki export.** Export your whole Vocabulary, or one Session's new words, as an `.apkg` deck. Importing it again updates the cards rather than duplicating them.
 - **Local and private.** Recordings, transcripts and your Vocabulary stay on your computer. Only the audio (to speech-to-text) and each sentence's text (to translation) are sent out, and only to the services whose keys you enter.
 
@@ -90,7 +90,7 @@ Tip: mute other sounds (music, notifications) while recording. Everything on the
 ### 2. Record a Session
 
 1. On **Sessions**, click **Start Session**.
-2. Tick **Also record my microphone** if you want your own voice saved as a separate track. It is never transcribed.
+2. Tick **Also record my microphone** if you want your own voice saved as a separate track. Tick **Also transcribe my speech** under it to see what you say in Live View too (use headphones so the teacher isn't transcribed as you; speech-to-text usage roughly doubles while you speak).
 3. Click **Start**, then play your class or video.
 
 The **Live View** shows the Arabic as it is spoken. Once a sentence is final, a gloss appears under each word and the English translation fills in beneath the sentence. Click any word to open its panel. Recording carries on.
@@ -123,7 +123,7 @@ Recordings, the database and settings are stored in `%APPDATA%\Arabic Session Wo
 - Windows only.
 - Modern Standard Arabic (Fusha) only. Dialects are not supported.
 - Arabic to English only.
-- The microphone is never transcribed, and speakers are not told apart.
+- Speakers are told apart only by track: the desktop audio is the teacher, the microphone is you. Your own speech is shown live only; Replay does not show it yet.
 
 ## Development
 

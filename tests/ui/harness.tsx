@@ -17,6 +17,7 @@ import {
   type DesktopAudioCapture,
   type LiveUtterance,
   type MicAudioCapture,
+  type Track,
 } from '../../src/renderer/bridge';
 import type { BundleProblem, ReadyUpdate } from '../../src/core/types';
 import type { Session, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails } from '../../src/core/types';
@@ -39,7 +40,7 @@ export class FakeBridge implements Bridge {
   chunks: Array<{ sessionId: number; chunk: Uint8Array }> = [];
   micChunks: Array<{ sessionId: number; chunk: Uint8Array }> = [];
   /** The options each startSession call was given, in order. */
-  startOptions: Array<{ mic: boolean } | undefined> = [];
+  startOptions: Array<{ mic: boolean; transcribeMic?: boolean } | undefined> = [];
   appendError: Error | null = null;
   vocabulary: VocabularyEntry[] = [];
   /** Word panel content by Lemma id. */
@@ -73,8 +74,9 @@ export class FakeBridge implements Bridge {
   exportResult: AnkiExportResult | null = { count: 3, path: String.raw`C:\Users\me\Documents\arabic-vocabulary-2026-11-07.apkg` };
   exportError: Error | null = null;
   shownFiles: string[] = [];
-  /** Why each Session's speech-to-text stopped, as the main process would say. */
+  /** Why each Session's speech-to-text stopped, as the main process would say; the Mic Track's in `micFailures`. */
   failures = new Map<number, string>();
+  micFailures = new Map<number, string>();
   /** Bundled parts the packaged build is missing, as the main process would say. */
   problems: BundleProblem[] = [];
   /** The update downloaded before the window opened, if any. */
@@ -83,7 +85,7 @@ export class FakeBridge implements Bridge {
   restartError: Error | null = null;
   private updateListeners = new Set<(update: ReadyUpdate) => void>();
   private listeners = new Map<number, (u: LiveUtterance) => void>();
-  private failureListeners = new Map<number, (message: string) => void>();
+  private failureListeners = new Map<number, (message: string, track: Track) => void>();
   private nextId: number;
 
   constructor(initial: Session[] = []) {
@@ -91,7 +93,7 @@ export class FakeBridge implements Bridge {
     this.nextId = Math.max(0, ...initial.map((s) => s.id)) + 1;
   }
 
-  async startSession(options?: { mic: boolean }) {
+  async startSession(options?: { mic: boolean; transcribeMic?: boolean }) {
     this.startOptions.push(options);
     const id = this.nextId++;
     const s = session({
@@ -212,17 +214,17 @@ export class FakeBridge implements Bridge {
     if (this.restartError) throw this.restartError;
     this.restarts++;
   }
-  async transcriptionFailure(sessionId: number) {
-    return this.failures.get(sessionId) ?? null;
+  async transcriptionFailure(sessionId: number, track: Track = 'desktop') {
+    return (track === 'mic' ? this.micFailures : this.failures).get(sessionId) ?? null;
   }
-  subscribeTranscriptionFailure(sessionId: number, onFailure: (message: string) => void) {
+  subscribeTranscriptionFailure(sessionId: number, onFailure: (message: string, track: Track) => void) {
     this.failureListeners.set(sessionId, onFailure);
     return () => void this.failureListeners.delete(sessionId);
   }
-  /** Plays the main process telling the renderer a Session's speech-to-text stopped. */
-  failTranscription(sessionId: number, message: string) {
-    this.failures.set(sessionId, message);
-    this.failureListeners.get(sessionId)?.(message);
+  /** Plays the main process telling the renderer a Session's speech-to-text stopped on a Track. */
+  failTranscription(sessionId: number, message: string, track: Track = 'desktop') {
+    (track === 'mic' ? this.micFailures : this.failures).set(sessionId, message);
+    this.failureListeners.get(sessionId)?.(message, track);
   }
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void) {
     this.listeners.set(sessionId, onUpdate);

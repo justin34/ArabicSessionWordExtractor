@@ -7,6 +7,7 @@ import type {
   SessionGuide,
   SessionStatus,
   Token,
+  Track,
   Utterance,
   VocabularyEntry,
   WordCard,
@@ -28,6 +29,7 @@ interface UtteranceRow {
   translation: string;
   start_ms: number;
   end_ms: number;
+  track: Track;
 }
 
 const toSession = (r: SessionRow): Session => ({
@@ -133,6 +135,7 @@ const toUtterance = (r: UtteranceRow, tokens: Token[]): Utterance => ({
   startMs: r.start_ms,
   endMs: r.end_ms,
   tokens,
+  track: r.track,
 });
 
 /** Local SQLite storage for Sessions and their Transcripts. */
@@ -219,6 +222,8 @@ export class Store {
     this.addColumnIfMissing('surface_forms', 'pronunciation', 'TEXT');
     // ... and before the Mic Track.
     this.addColumnIfMissing('sessions', 'mic_track_path', 'TEXT');
+    // ... and before Learner Utterances (ADR 0004): everything stored until then is the Desktop Track's.
+    this.addColumnIfMissing('utterances', 'track', "TEXT NOT NULL DEFAULT 'desktop'");
   }
 
   private addColumnIfMissing(table: string, column: string, type: string): void {
@@ -290,9 +295,9 @@ export class Store {
     try {
       const id = this.db
         .prepare(
-          'INSERT INTO utterances (session_id, text, translation, start_ms, end_ms) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO utterances (session_id, text, translation, start_ms, end_ms, track) VALUES (?, ?, ?, ?, ?, ?)',
         )
-        .run(u.sessionId, u.text, u.translation, u.startMs, u.endMs).lastInsertRowid;
+        .run(u.sessionId, u.text, u.translation, u.startMs, u.endMs, u.track).lastInsertRowid;
       const insertToken = this.db.prepare(
         'INSERT INTO tokens (utterance_id, position, surface, start_ms, end_ms) VALUES (?, ?, ?, ?, ?)',
       );
@@ -326,9 +331,14 @@ export class Store {
   /**
    * Adds an analyzed Utterance's words to the Vocabulary: a new Lemma is appended, a
    * known one gains an occurrence and any new surface form. Links each matched Token to
-   * its Lemma. Returns the Lemma id per word.
+   * its Lemma. Returns the Lemma id per word. A Learner Utterance's words never enter the
+   * Vocabulary (ADR 0004), so one is refused.
    */
   recordHeardWords(utteranceId: number, heardAt: string, words: HeardWord[]): number[] {
+    const heardOn = this.db.prepare('SELECT track FROM utterances WHERE id = ?').get(utteranceId) as
+      | { track: Track }
+      | undefined;
+    if (heardOn?.track === 'mic') throw new Error(`Utterance ${utteranceId} is a Learner Utterance`);
     const upsertLemma = this.db.prepare(
       `INSERT INTO lemmas (lemma, root, part_of_speech, stem_gloss, pattern, first_heard_at)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -383,7 +393,8 @@ export class Store {
   listVocabulary(): VocabularyEntry[] {
     const lemmas = this.db
       .prepare(
-        `SELECT l.*, (SELECT count(*) FROM occurrences o WHERE o.lemma_id = l.id) AS count
+        `SELECT l.*, (SELECT count(*) FROM occurrences o JOIN utterances u ON u.id = o.utterance_id
+                 WHERE o.lemma_id = l.id AND u.track = 'desktop') AS count
          FROM lemmas l ORDER BY l.first_heard_at DESC, l.id DESC`,
       )
       .all() as unknown as LemmaRow[];
@@ -397,6 +408,7 @@ export class Store {
       .prepare(
         `SELECT DISTINCT o.lemma_id, u.session_id, o.utterance_id
          FROM occurrences o JOIN utterances u ON u.id = o.utterance_id
+         WHERE u.track = 'desktop'
          ORDER BY o.lemma_id, o.utterance_id`,
       )
       .all() as unknown as Array<{ lemma_id: number; session_id: number; utterance_id: number }>;
@@ -422,7 +434,8 @@ export class Store {
   getLemma(lemmaId: number): LemmaRecord | undefined {
     const l = this.db
       .prepare(
-        `SELECT l.*, (SELECT count(*) FROM occurrences o WHERE o.lemma_id = l.id) AS count
+        `SELECT l.*, (SELECT count(*) FROM occurrences o JOIN utterances u ON u.id = o.utterance_id
+                 WHERE o.lemma_id = l.id AND u.track = 'desktop') AS count
          FROM lemmas l WHERE l.id = ?`,
       )
       .get(lemmaId) as unknown as (LemmaRow & { pattern: string | null }) | undefined;
@@ -453,7 +466,7 @@ export class Store {
         `SELECT u.id AS utteranceId, u.session_id AS sessionId, s.started_at AS sessionStartedAt,
                 u.text, u.translation
          FROM utterances u JOIN sessions s ON s.id = u.session_id
-         WHERE u.id IN (SELECT utterance_id FROM occurrences WHERE lemma_id = ?)
+         WHERE u.id IN (SELECT utterance_id FROM occurrences WHERE lemma_id = ?) AND u.track = 'desktop'
          ORDER BY s.started_at DESC, u.session_id DESC, u.start_ms DESC, u.id DESC
          LIMIT ?`,
       )
@@ -467,7 +480,7 @@ export class Store {
       .prepare(
         `SELECT s.id AS sessionId, s.started_at AS startedAt, count(*) AS count
          FROM occurrences o JOIN utterances u ON u.id = o.utterance_id JOIN sessions s ON s.id = u.session_id
-         WHERE o.lemma_id = ?
+         WHERE o.lemma_id = ? AND u.track = 'desktop'
          GROUP BY s.id ORDER BY s.started_at DESC, s.id DESC`,
       )
       .all(lemmaId)
@@ -530,7 +543,7 @@ export class Store {
       this.db
         .prepare(
           `SELECT DISTINCT o.lemma_id AS id FROM occurrences o JOIN utterances u ON u.id = o.utterance_id
-           WHERE u.session_id = ? ORDER BY o.lemma_id`,
+           WHERE u.session_id = ? AND u.track = 'desktop' ORDER BY o.lemma_id`,
         )
         .all(sessionId) as Array<{ id: number }>
     ).map((r) => r.id);
@@ -546,14 +559,14 @@ export class Store {
         `SELECT l.id AS lemmaId, l.lemma, l.part_of_speech AS partOfSpeech, l.stem_gloss AS stemGloss,
                 count(*) AS count,
                 (SELECT t.gloss FROM tokens t JOIN utterances tu ON tu.id = t.utterance_id
-                 WHERE t.lemma_id = l.id AND tu.session_id = ?1 AND t.gloss <> ''
+                 WHERE t.lemma_id = l.id AND tu.session_id = ?1 AND tu.track = 'desktop' AND t.gloss <> ''
                  ORDER BY tu.start_ms, tu.id, t.position LIMIT 1) AS gloss,
                 min(printf('%012d %012d %06d', u.start_ms, u.id, o.position)) AS heardOrder
          FROM occurrences o JOIN utterances u ON u.id = o.utterance_id JOIN lemmas l ON l.id = o.lemma_id
-         WHERE u.session_id = ?1
+         WHERE u.session_id = ?1 AND u.track = 'desktop'
            AND NOT EXISTS (
              SELECT 1 FROM occurrences po JOIN utterances pu ON pu.id = po.utterance_id
-             WHERE po.lemma_id = l.id AND pu.session_id < ?1)
+             WHERE po.lemma_id = l.id AND pu.session_id < ?1 AND pu.track = 'desktop')
          GROUP BY l.id ORDER BY heardOrder, l.id`,
       )
       .all(sessionId)

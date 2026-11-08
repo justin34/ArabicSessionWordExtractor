@@ -176,13 +176,13 @@ function registerIpc({ sessions, vocabulary, words, guides, anki, settings, apiK
       win.webContents.send('transcript:update', sessionId, update);
     }
   });
-  sessions.subscribeTranscriptionFailures((sessionId, message) => {
+  sessions.subscribeTranscriptionFailures((sessionId, message, track) => {
     for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('transcript:failed', sessionId, message);
+      win.webContents.send('transcript:failed', sessionId, message, track);
     }
   });
-  ipcMain.handle('sessions:transcriptionFailure', (_event, id: unknown) =>
-    sessions.transcriptionFailure(requireSessionId(id)) ?? null,
+  ipcMain.handle('sessions:transcriptionFailure', (_event, id: unknown, track: unknown) =>
+    sessions.transcriptionFailure(requireSessionId(id), track === 'mic' ? 'mic' : 'desktop') ?? null,
   );
   // Keys go in, never back out: the renderer sees only whether each is set.
   ipcMain.handle('settings:apiKeys', () => apiKeys.status());
@@ -203,9 +203,11 @@ function registerIpc({ sessions, vocabulary, words, guides, anki, settings, apiK
     }
     void shutDown().finally(() => autoUpdater.quitAndInstall());
   });
-  ipcMain.handle('sessions:start', (_event, options: unknown) =>
-    sessions.start('webm', { mic: (options as { mic?: unknown } | undefined)?.mic === true }),
-  );
+  ipcMain.handle('sessions:start', (_event, options: unknown) => {
+    const o = options as { mic?: unknown; transcribeMic?: unknown } | undefined;
+    const mic = o?.mic === true;
+    return sessions.start('webm', { mic, transcribeMic: mic && o?.transcribeMic === true });
+  });
   ipcMain.handle('sessions:appendDesktopAudio', (_event, id: unknown, chunk: unknown) =>
     sessions.appendDesktopAudio(requireSessionId(id), requireChunk(chunk)),
   );
