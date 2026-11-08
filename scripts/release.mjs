@@ -1,7 +1,8 @@
 // `npm run release`: builds the Installer and uploads it as a draft GitHub Release
 // v<version> (GLOSSARY: Installer). Publishing the draft is done by hand on GitHub.
 //
-// Before anything is uploaded, the packaged build (release/win-unpacked) is launched with
+// Before anything is uploaded, the packaged build (win-unpacked, in the build output folder
+// from scripts/buildOutput.mjs) is launched with
 // --self-check: its CAMeL helper must analyze a sentence and its dictionary must open. If
 // either fails there is no release.
 //
@@ -11,6 +12,7 @@ import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { buildOutputDir } from './buildOutput.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -36,7 +38,7 @@ if (existing.status === 0) fail(`${tag} already exists: raise the version in pac
 execSync('npm run dist', { cwd: root, stdio: 'inherit' });
 
 // 3. The packaged build's own check of its helper and dictionary.
-const exe = join(root, 'release', 'win-unpacked', `${productName}.exe`);
+const exe = join(buildOutputDir, 'win-unpacked', `${productName}.exe`);
 if (!existsSync(exe)) fail(`there is no packaged build at ${exe}.`);
 const work = mkdtempSync(join(tmpdir(), 'release-check-'));
 try {
@@ -52,8 +54,8 @@ try {
   console.log('The CAMeL helper analyzed a sentence and the dictionary opened.');
 
   // 4. The draft release: the Installer, its blockmap, and latest.yml for the updater.
-  const installer = join(root, 'release', `Arabic-Session-Word-Extractor-Setup-${version}.exe`);
-  const assets = [installer, `${installer}.blockmap`, join(root, 'release', 'latest.yml')];
+  const installer = join(buildOutputDir, `Arabic-Session-Word-Extractor-Setup-${version}.exe`);
+  const assets = [installer, `${installer}.blockmap`, join(buildOutputDir, 'latest.yml')];
   for (const asset of assets) if (!existsSync(asset)) fail(`${asset} was not built.`);
   const notesFile = join(work, 'notes.md');
   writeFileSync(
