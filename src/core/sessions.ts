@@ -6,7 +6,14 @@ import { quickGloss } from './dictionary/gloss';
 import type { StudyGuideHooks } from './guides/studyGuides';
 import type { DictionaryEntry, Providers, TokenAnalysis } from './providers';
 import type { HeardWord, Store } from './store';
-import type { LiveUtterance, Session, Token, TranscriptListener, Utterance } from './types';
+import type {
+  LiveUtterance,
+  Session,
+  Token,
+  TranscriptionFailureListener,
+  TranscriptListener,
+  Utterance,
+} from './types';
 
 interface LiveSession {
   desktopTrackPath: string;
@@ -15,6 +22,10 @@ interface LiveSession {
   audio: AudioChannel;
   /** False once speech-to-text has failed; audio then goes to the Desktop Track only. */
   transcribing: boolean;
+  /** Set once the Session is being stopped, so the stream ending then is no failure. */
+  stopping: boolean;
+  /** Why speech-to-text stopped before the Session did; undefined while it works. */
+  transcriptionFailure?: string;
   /** Settles when the provider pipeline has drained. Never rejects. */
   transcribed: Promise<void>;
   /** Translations and analyses of final Utterances still in flight. Each settles, never rejects. */
@@ -39,6 +50,7 @@ interface FinalUtterance {
 export class Sessions {
   private readonly live = new Map<number, LiveSession>();
   private readonly listeners = new Set<TranscriptListener>();
+  private readonly failureListeners = new Set<TranscriptionFailureListener>();
 
   constructor(
     private readonly store: Store,
@@ -69,6 +81,7 @@ export class Sessions {
       micTrackPath: session.micTrackPath,
       audio: new AudioChannel(),
       transcribing: true,
+      stopping: false,
       transcribed: Promise.resolve(),
       followUps: new Set(),
     };
@@ -100,6 +113,7 @@ export class Sessions {
     const live = this.live.get(sessionId);
     if (!live) return this.store.getSession(sessionId);
     this.live.delete(sessionId);
+    live.stopping = true;
     live.audio.close();
     await live.transcribed;
     // Translations and analyses started by the last Utterances finish before the Session completes.
@@ -131,6 +145,20 @@ export class Sessions {
   subscribe(listener: TranscriptListener): () => void {
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
+  }
+
+  /**
+   * Told when a live Session's speech-to-text stops early: the provider failed, the
+   * stream dropped, or there is no key. The Session's audio keeps recording.
+   */
+  subscribeTranscriptionFailures(listener: TranscriptionFailureListener): () => void {
+    this.failureListeners.add(listener);
+    return () => void this.failureListeners.delete(listener);
+  }
+
+  /** Why a live Session's speech-to-text stopped; undefined while it works or once the Session ends. */
+  transcriptionFailure(sessionId: number): string | undefined {
+    return this.live.get(sessionId)?.transcriptionFailure;
   }
 
   list(): Session[] {
@@ -212,12 +240,27 @@ export class Sessions {
           live.followUps.add(followUp);
         }
       }
+      // A stream that ends while the Session still records was dropped by the service.
+      if (!live.stopping) this.failTranscription(sessionId, live, 'The speech-to-text service ended the stream early.');
     } catch (err) {
       // The Desktop Track is written independently; a provider failure must never lose audio.
       console.error(`Transcription failed for Session ${sessionId}:`, err);
+      if (!live.stopping) this.failTranscription(sessionId, live, (err as Error).message || String(err));
     } finally {
       // Nothing reads the channel any more, so stop queueing audio into it.
       live.transcribing = false;
+    }
+  }
+
+  private failTranscription(sessionId: number, live: LiveSession, message: string): void {
+    live.transcribing = false;
+    live.transcriptionFailure = message;
+    for (const listener of this.failureListeners) {
+      try {
+        listener(sessionId, message);
+      } catch (err) {
+        console.error('Transcription failure listener failed:', err);
+      }
     }
   }
 

@@ -1,4 +1,7 @@
 import type {
+  ApiKeyCheck,
+  ApiKeyName,
+  ApiKeyStatus,
   AudioDevice,
   AudioSettings,
   LiveUtterance,
@@ -10,7 +13,7 @@ import type {
   WordDetails,
 } from '../core/types';
 
-export type { AudioDevice, AudioSettings, LiveUtterance, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails };
+export type { ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, LiveUtterance, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -43,8 +46,20 @@ export interface Bridge {
   /** Which audio devices Sessions record from, as stored. */
   audioSettings(): Promise<AudioSettings>;
   saveAudioSettings(settings: AudioSettings): Promise<AudioSettings>;
-  /** Live transcript for a real Session. Nothing is connected to it yet. */
+  /** Whether each API key is set, and where from; never the keys themselves. */
+  apiKeys(): Promise<ApiKeyStatus[]>;
+  /** Stores a key entered in Settings, or removes it with null; rejects one that cannot be a key. */
+  saveApiKey(name: ApiKeyName, key: string | null): Promise<ApiKeyStatus[]>;
+  /** Tries the key in use against its service. */
+  checkApiKey(name: ApiKeyName): Promise<ApiKeyCheck>;
+  /** The dictionary build's attribution notice; null when there is no dictionary. */
+  dictionaryNotice(): Promise<string | null>;
+  /** Live transcript for a real Session. */
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void): Unsubscribe;
+  /** Why a live Session's speech-to-text has stopped; null while it works. */
+  transcriptionFailure(sessionId: number): Promise<string | null>;
+  /** Told when a live Session's speech-to-text stops; its audio keeps recording. */
+  subscribeTranscriptionFailure(sessionId: number, onFailure: (message: string) => void): Unsubscribe;
 }
 
 /** Thrown by capture when the system offers no desktop audio. */

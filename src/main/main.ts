@@ -1,22 +1,15 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, protocol, session } from 'electron';
-import { existsSync } from 'node:fs';
+import { app, BrowserWindow, desktopCapturer, ipcMain, protocol, safeStorage, session, shell } from 'electron';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp, type App } from '../core/app';
 import { audioFileResponse } from '../core/audioFile';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
 import { readDetailModuleConfig } from '../core/details/wordDetails';
-import { parseAudioSettings } from '../core/settings';
+import { KeyedSpeechToText, KeyedTranslator } from '../core/apiKeys';
+import { isApiKeyName, parseApiKey, parseAudioSettings, type SecretCodec } from '../core/settings';
 import { SqliteDictionary } from '../core/dictionary/sqlite';
-import type { ArabicAnalyzer, Dictionary, SpeechToText, Translator } from '../core/providers';
-import { DeepgramSpeechToText } from '../core/stt/deepgram';
-import { SonioxSpeechToText } from '../core/stt/soniox';
-import { GoogleTranslator } from '../core/translation/google';
-import {
-  FakeArabicAnalyzer,
-  FakeDictionary,
-  FakeSpeechToText,
-  FakeTranslator,
-} from '../core/fakes';
+import type { ArabicAnalyzer, Dictionary } from '../core/providers';
+import { FakeArabicAnalyzer, FakeDictionary } from '../core/fakes';
 
 const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
 
@@ -38,23 +31,26 @@ function requireChunk(value: unknown): Uint8Array {
   return value;
 }
 
-/**
- * Soniox first, Deepgram as the fallback (GLOSSARY, STT provider). Keys come from the
- * environment until the settings screen exists; with neither, Transcripts stay empty.
- */
-function speechToTextFromEnv(env: NodeJS.ProcessEnv): SpeechToText {
-  if (env.SONIOX_API_KEY) return new SonioxSpeechToText({ apiKey: env.SONIOX_API_KEY });
-  if (env.DEEPGRAM_API_KEY) return new DeepgramSpeechToText({ apiKey: env.DEEPGRAM_API_KEY });
-  console.warn('No SONIOX_API_KEY or DEEPGRAM_API_KEY set: Sessions record without a transcript.');
-  return new FakeSpeechToText([]);
-}
+const SAFE_PREFIX = 'safe:';
 
-/** Google Cloud Translation (GLOSSARY, Sentence translation); without a key, no translations. */
-function translatorFromEnv(env: NodeJS.ProcessEnv): Translator {
-  if (env.GOOGLE_TRANSLATE_API_KEY) return new GoogleTranslator({ apiKey: env.GOOGLE_TRANSLATE_API_KEY });
-  console.warn('No GOOGLE_TRANSLATE_API_KEY set: Utterances show without a sentence translation.');
-  return new FakeTranslator();
-}
+/**
+ * API keys in settings.json are encrypted with the operating system's key store (DPAPI on
+ * Windows), so the file alone does not give them away. Where that is unavailable they are
+ * kept as entered.
+ */
+const keyCodec: SecretCodec = {
+  encode(plain) {
+    if (!safeStorage.isEncryptionAvailable()) {
+      console.warn('The system key store is unavailable: API keys are saved unencrypted.');
+      return plain;
+    }
+    return SAFE_PREFIX + safeStorage.encryptString(plain).toString('base64');
+  },
+  decode(stored) {
+    if (!stored.startsWith(SAFE_PREFIX)) return stored;
+    return safeStorage.decryptString(Buffer.from(stored.slice(SAFE_PREFIX.length), 'base64'));
+  },
+};
 
 /**
  * The CAMeL helper bundle (GLOSSARY, Installer size): built into vendor/camel-helper by
@@ -83,10 +79,12 @@ function arabicAnalyzerFromBundle(): ArabicAnalyzer {
  * `npm run build:dictionary`, and shipped as resources/dictionary in packaged builds.
  * Without it, words are glossed by the analyzer's stem gloss alone.
  */
+function dictionaryDir(): string {
+  return app.isPackaged ? join(process.resourcesPath, 'dictionary') : join(app.getAppPath(), 'vendor', 'dictionary');
+}
+
 function dictionaryFromBundle(): Dictionary {
-  const path = app.isPackaged
-    ? join(process.resourcesPath, 'dictionary', 'dictionary.db')
-    : join(app.getAppPath(), 'vendor', 'dictionary', 'dictionary.db');
+  const path = join(dictionaryDir(), 'dictionary.db');
   if (!existsSync(path)) {
     console.warn(`No dictionary at ${path} (npm run build:dictionary): glosses come from the analyzer only.`);
     return new FakeDictionary();
@@ -111,13 +109,45 @@ function optionalSurface(value: unknown): string | undefined {
   return typeof value === 'string' && value.length <= 200 ? value : undefined;
 }
 
-function registerIpc({ sessions, vocabulary, words, guides, settings }: App): void {
+/** The attribution the dictionary build wrote beside the database, for the Credits screen. */
+function dictionaryNotice(): string | null {
+  const path = join(dictionaryDir(), 'NOTICE.txt');
+  try {
+    return existsSync(path) ? readFileSync(path, 'utf8') : null;
+  } catch {
+    return null;
+  }
+}
+
+function requireKeyName(value: unknown) {
+  if (!isApiKeyName(value)) throw new Error('Unknown API key');
+  return value;
+}
+
+function registerIpc({ sessions, vocabulary, words, guides, settings, apiKeys }: App): void {
   // Every window hears every live Session; the renderer picks the one it shows.
   sessions.subscribe((sessionId, update) => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('transcript:update', sessionId, update);
     }
   });
+  sessions.subscribeTranscriptionFailures((sessionId, message) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('transcript:failed', sessionId, message);
+    }
+  });
+  ipcMain.handle('sessions:transcriptionFailure', (_event, id: unknown) =>
+    sessions.transcriptionFailure(requireSessionId(id)) ?? null,
+  );
+  // Keys go in, never back out: the renderer sees only whether each is set.
+  ipcMain.handle('settings:apiKeys', () => apiKeys.status());
+  ipcMain.handle('settings:setApiKey', (_event, name: unknown, value: unknown) => {
+    const key = parseApiKey(value);
+    if (key === undefined) throw new Error('That does not look like an API key: paste it without spaces.');
+    return apiKeys.set(requireKeyName(name), key);
+  });
+  ipcMain.handle('settings:checkApiKey', (_event, name: unknown) => apiKeys.check(requireKeyName(name)));
+  ipcMain.handle('credits:dictionaryNotice', () => dictionaryNotice());
   ipcMain.handle('sessions:start', (_event, options: unknown) =>
     sessions.start('webm', { mic: (options as { mic?: unknown } | undefined)?.mic === true }),
   );
@@ -197,6 +227,18 @@ function createWindow(): void {
       nodeIntegration: false,
     },
   });
+  // Links (the Credits screen's) open in the system browser; the window never leaves the app.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://')) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    // The app's own pages (file://, or the Vite dev server) load as usual.
+    const devUrl = process.env.VITE_DEV_SERVER_URL;
+    if (!/^https?:\/\//.test(url) || (devUrl && url.startsWith(devUrl))) return;
+    event.preventDefault();
+    if (url.startsWith('https://')) void shell.openExternal(url);
+  });
   // In dev (npm run dev) the renderer is served by Vite for hot reload.
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) void win.loadURL(devUrl);
@@ -205,8 +247,8 @@ function createWindow(): void {
 
 /**
  * Dev and `npm start` read API keys from a git-ignored `.env` at the repo root (see
- * .env.example). Variables already set in the environment win. Packaged builds never
- * read it; keys there come from the settings screen (#13).
+ * .env.example). Variables already set in the environment win over it, and keys entered
+ * on the settings screen win over both. Packaged builds never read it.
  */
 function loadDevEnvFile(): void {
   if (app.isPackaged) return;
@@ -219,14 +261,17 @@ void app.whenReady().then(() => {
   const dataDir = app.getPath('userData');
   core = createApp({
     dataDir,
-    // Until the settings screen (#13), the word panel's modules are set in this file.
+    secrets: keyCodec,
+    // Keys entered in Settings win; environment variables (or the dev .env) fill in.
+    keys: { env: process.env },
+    // The word panel's modules are set in this file; they are not on the settings screen yet.
     detailModules: readDetailModuleConfig(join(dataDir, 'detail-modules.json')),
-    providers: {
-      speechToText: speechToTextFromEnv(process.env),
-      translator: translatorFromEnv(process.env),
+    providers: (keys) => ({
+      speechToText: new KeyedSpeechToText(keys),
+      translator: new KeyedTranslator(keys),
       arabicAnalyzer: arabicAnalyzerFromBundle(),
       dictionary: dictionaryFromBundle(),
-    },
+    }),
   });
   registerIpc(core);
   serveSessionAudio(core);

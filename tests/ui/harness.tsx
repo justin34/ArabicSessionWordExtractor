@@ -2,6 +2,9 @@ import { render } from '@testing-library/react';
 import { App } from '../../src/renderer/App';
 import {
   DeviceUnavailableError,
+  type ApiKeyCheck,
+  type ApiKeyName,
+  type ApiKeyStatus,
   NoDesktopAudioError,
   type AudioCapture,
   type AudioDevice,
@@ -51,7 +54,21 @@ export class FakeBridge implements Bridge {
   audio: AudioSettings = { desktopSource: null, microphone: null };
   savedAudio: AudioSettings[] = [];
   saveAudioError: Error | null = null;
+  /** Stored API keys by name (the fake keeps them; the real bridge never returns them). */
+  keys = new Map<ApiKeyName, string>();
+  /** Keys set only by the environment. */
+  envKeys = new Map<ApiKeyName, string>();
+  savedKeys: Array<{ name: ApiKeyName; key: string | null }> = [];
+  saveKeyError: Error | null = null;
+  /** The outcome of checking each key; a key with none set is missing. */
+  keyChecks = new Map<ApiKeyName, ApiKeyCheck>();
+  checkedKeys: ApiKeyName[] = [];
+  apiKeysError: Error | null = null;
+  notice: string | null = null;
+  /** Why each Session's speech-to-text stopped, as the main process would say. */
+  failures = new Map<number, string>();
   private listeners = new Map<number, (u: LiveUtterance) => void>();
+  private failureListeners = new Map<number, (message: string) => void>();
   private nextId: number;
 
   constructor(initial: Session[] = []) {
@@ -126,6 +143,44 @@ export class FakeBridge implements Bridge {
     this.savedAudio.push(settings);
     this.audio = settings;
     return settings;
+  }
+  async apiKeys(): Promise<ApiKeyStatus[]> {
+    if (this.apiKeysError) throw this.apiKeysError;
+    return (['soniox', 'deepgram', 'googleTranslate'] as const).map((name) => {
+      const key = this.keys.get(name) ?? this.envKeys.get(name);
+      return {
+        name,
+        source: key === undefined ? null : this.keys.has(name) ? 'settings' : 'environment',
+        hint: key === undefined ? null : key.slice(-4),
+      };
+    });
+  }
+  async saveApiKey(name: ApiKeyName, key: string | null) {
+    if (this.saveKeyError) throw this.saveKeyError;
+    this.savedKeys.push({ name, key });
+    // Trimmed, as the main process stores it.
+    if (key === null || key.trim() === '') this.keys.delete(name);
+    else this.keys.set(name, key.trim());
+    return this.apiKeys();
+  }
+  async checkApiKey(name: ApiKeyName): Promise<ApiKeyCheck> {
+    this.checkedKeys.push(name);
+    return this.keyChecks.get(name) ?? { ok: true, message: 'The service accepted the key.' };
+  }
+  async dictionaryNotice() {
+    return this.notice;
+  }
+  async transcriptionFailure(sessionId: number) {
+    return this.failures.get(sessionId) ?? null;
+  }
+  subscribeTranscriptionFailure(sessionId: number, onFailure: (message: string) => void) {
+    this.failureListeners.set(sessionId, onFailure);
+    return () => void this.failureListeners.delete(sessionId);
+  }
+  /** Plays the main process telling the renderer a Session's speech-to-text stopped. */
+  failTranscription(sessionId: number, message: string) {
+    this.failures.set(sessionId, message);
+    this.failureListeners.get(sessionId)?.(message);
   }
   subscribeTranscript(sessionId: number, onUpdate: (u: LiveUtterance) => void) {
     this.listeners.set(sessionId, onUpdate);

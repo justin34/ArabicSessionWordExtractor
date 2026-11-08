@@ -62,3 +62,7 @@
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
+.live__warning--transcription {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}

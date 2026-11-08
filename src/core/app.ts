@@ -1,11 +1,12 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isArabicWord } from './analysis/align';
+import { ApiKeys, type ApiKeysOptions } from './apiKeys';
 import { WordDetailsBuilder, type DetailModuleConfig } from './details/wordDetails';
 import { StudyGuides } from './guides/studyGuides';
 import type { Providers } from './providers';
 import { Sessions } from './sessions';
-import { Settings } from './settings';
+import { Settings, type SecretCodec } from './settings';
 import { Store } from './store';
 import type { SessionGuide, VocabularyEntry, WordCard, WordDetails } from './types';
 
@@ -35,20 +36,30 @@ export interface App {
   guides: Guides;
   /** Stored settings, e.g. which audio devices to record from. */
   settings: Settings;
+  /** The API keys in use, from Settings or the environment, and their checks. */
+  apiKeys: ApiKeys;
   /** Closes storage. Word Cards still being rebuilt are left as they were; wait for `guides.idle()` to finish them. */
   close(): void;
 }
 
 export interface AppOptions {
   dataDir: string;
-  providers: Providers;
+  /** The providers, or a builder given the API keys (for the keyed speech-to-text and translator). */
+  providers: Providers | ((keys: ApiKeys) => Providers);
+  /** How API keys are kept in `settings.json`; as entered by default. */
+  secrets?: SecretCodec;
+  /** Environment fallback for API keys, and the key checks' fetch. */
+  keys?: ApiKeysOptions;
   /** Detail Modules for the word panel and Word Cards, in order; all built-ins by default. */
   detailModules?: DetailModuleConfig;
 }
 
 /** Wires local storage and the providers into the Session pipeline. */
-export function createApp({ dataDir, providers, detailModules }: AppOptions): App {
+export function createApp({ dataDir, providers: given, secrets, keys, detailModules }: AppOptions): App {
   mkdirSync(dataDir, { recursive: true });
+  const settings = new Settings(join(dataDir, 'settings.json'), secrets);
+  const apiKeys = new ApiKeys(settings, keys);
+  const providers = typeof given === 'function' ? given(apiKeys) : given;
   const store = new Store(join(dataDir, 'app.db'));
   // Foreign words stored before they were kept out of the Vocabulary leave it now.
   store.removeForeignWords(isArabicWord);
@@ -68,6 +79,5 @@ export function createApp({ dataDir, providers, detailModules }: AppOptions): Ap
     studyGuides.stop();
     store.close();
   };
-  const settings = new Settings(join(dataDir, 'settings.json'));
-  return { sessions, vocabulary, words, guides, settings, close };
+  return { sessions, vocabulary, words, guides, settings, apiKeys, close };
 }

@@ -87,6 +87,28 @@ export interface AudioSettings {
   microphone: AudioDevice | null;
 }
 
+/** The services the app needs an API key for: speech-to-text (Soniox, else Deepgram) and translation. */
+export type ApiKeyName = 'soniox' | 'deepgram' | 'googleTranslate';
+
+/** Whether a key is set, and where from; the key itself never leaves the main process. */
+export interface ApiKeyStatus {
+  name: ApiKeyName;
+  /** 'settings' when entered on the settings screen; 'environment' when only an environment variable sets it. */
+  source: 'settings' | 'environment' | null;
+  /** The key's last four characters, to tell keys apart; null when none is set. */
+  hint: string | null;
+}
+
+/**
+ * The outcome of trying a key against its service. `invalid`: the service refused it.
+ * `unreachable`: the service could not be asked (offline, timeout), so the key may be fine.
+ * `missing`: there is no key to try. Every failure's message says how to fix it.
+ */
+export type ApiKeyCheck = { ok: true; message: string } | { ok: false; problem: 'invalid' | 'unreachable' | 'missing'; message: string };
+
+/** Sent when a live Session's speech-to-text stops; its audio keeps recording. */
+export type TranscriptionFailureListener = (sessionId: number, message: string) => void;
+
 export type TranscriptListener = (sessionId: number, update: LiveUtterance) => void;
 
 /** One labelled fact in a Detail Module's section, e.g. root ك.ت.ب. */

@@ -45,11 +45,22 @@ function TranslationWarning({ error }: { error: string }) {
   );
 }
 
+function TranscriptionWarning({ reason }: { reason: string }) {
+  return (
+    <div className="live__warning live__warning--transcription" role="status">
+      <strong>Transcription has stopped; the audio is still recording.</strong> Check your connection and
+      the speech-to-text key in Settings, then start a new Session to transcribe again.
+      <span className="live__warning-detail">{reason}</span>
+    </div>
+  );
+}
+
 export function LiveView({
   session,
   now,
   utterances,
   getLevel,
+  transcriptionFailure,
   onStop,
   onBack,
   loadWordDetails,
@@ -59,6 +70,8 @@ export function LiveView({
   utterances: LiveUtterance[];
   /** Audio level source; absent for Demo Sessions, which capture no audio. */
   getLevel?: () => number;
+  /** Why speech-to-text stopped; the recording carries on without it. */
+  transcriptionFailure?: string;
   onStop: () => void;
   onBack: () => void;
   loadWordDetails: LoadWordDetails;
@@ -102,6 +115,7 @@ export function LiveView({
           Stop
         </button>
       </header>
+      {transcriptionFailure && <TranscriptionWarning reason={transcriptionFailure} />}
       {translationError && <TranslationWarning error={translationError} />}
       <div className="live__bodywrap">
         <div className="live__body" role="log" aria-label="Transcript" ref={logRef} onScroll={onScroll}>

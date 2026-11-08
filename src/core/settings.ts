@@ -1,10 +1,26 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import type { AudioDevice, AudioSettings } from './types';
+import type { ApiKeyName, AudioDevice, AudioSettings } from './types';
 
 /** The system's own choices: all system audio (loopback) transcribed, the default microphone. */
 export const DEFAULT_AUDIO_SETTINGS: AudioSettings = { desktopSource: null, microphone: null };
 
+/** The API keys the settings screen holds, in the order it shows them. */
+export const API_KEY_NAMES: readonly ApiKeyName[] = ['soniox', 'deepgram', 'googleTranslate'];
+
 const MAX_TEXT = 500;
+const MAX_KEY = 2000;
+
+/**
+ * How API keys are kept on disk. The main process encrypts them with the operating
+ * system's key store (Electron safeStorage); tests keep them as they are.
+ */
+export interface SecretCodec {
+  encode(plain: string): string;
+  /** Throws when the stored value cannot be decoded, e.g. it was encrypted for another user. */
+  decode(stored: string): string;
+}
+
+const PLAIN: SecretCodec = { encode: (s) => s, decode: (s) => s };
 
 function asDevice(value: unknown): AudioDevice | null | undefined {
   if (value === null) return null;
@@ -25,34 +41,83 @@ export function parseAudioSettings(value: unknown): AudioSettings | undefined {
   return { desktopSource: desktop, microphone: mic };
 }
 
+export function isApiKeyName(value: unknown): value is ApiKeyName {
+  return typeof value === 'string' && (API_KEY_NAMES as readonly string[]).includes(value);
+}
+
 /**
- * The app's settings, kept in `settings.json` in its data folder. Only audio devices for
- * now; the rest of the settings screen (#13) is to be stored alongside.
+ * A key as entered: surrounding whitespace (a stray space or newline from copying) is
+ * dropped; empty means remove. Undefined when it cannot be a key.
  */
+export function parseApiKey(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const key = value.trim();
+  if (key === '') return null;
+  if (key.length > MAX_KEY || /\s/.test(key)) return undefined;
+  return key;
+}
+
+type SettingsFile = Record<string, unknown>;
+
+/** The app's settings, kept in `settings.json` in its data folder: audio devices and API keys. */
 export class Settings {
-  constructor(private readonly path: string) {}
+  constructor(
+    private readonly path: string,
+    private readonly secrets: SecretCodec = PLAIN,
+  ) {}
 
   audio(): AudioSettings {
-    return this.read().audio;
+    const file = this.read();
+    if (file.audio === undefined) return DEFAULT_AUDIO_SETTINGS;
+    const audio = parseAudioSettings(file.audio);
+    if (!audio) console.warn(`${this.path} has malformed audio settings; the system defaults are used.`);
+    return audio ?? DEFAULT_AUDIO_SETTINGS;
   }
 
   setAudio(settings: AudioSettings): AudioSettings {
-    const file = this.read().file;
-    writeFileSync(this.path, JSON.stringify({ ...file, audio: settings }, null, 2));
+    this.write({ ...this.read(), audio: settings });
     return settings;
   }
 
-  private read(): { file: Record<string, unknown>; audio: AudioSettings } {
-    if (!existsSync(this.path)) return { file: {}, audio: DEFAULT_AUDIO_SETTINGS };
+  /** A stored API key; undefined when none is stored or it cannot be read back. */
+  apiKey(name: ApiKeyName): string | undefined {
+    const stored = this.storedKeys()[name];
+    if (typeof stored !== 'string' || stored === '') return undefined;
+    try {
+      return this.secrets.decode(stored);
+    } catch (err) {
+      console.warn(`The stored ${name} key could not be read (${(err as Error).message}); enter it again.`);
+      return undefined;
+    }
+  }
+
+  /** Stores an API key, or removes it with null. */
+  setApiKey(name: ApiKeyName, key: string | null): void {
+    const file = this.read();
+    const keys = { ...this.storedKeys(file) };
+    if (key === null) delete keys[name];
+    else keys[name] = this.secrets.encode(key);
+    this.write({ ...file, apiKeys: keys });
+  }
+
+  private storedKeys(file = this.read()): Record<string, unknown> {
+    const keys = file.apiKeys;
+    return typeof keys === 'object' && keys !== null && !Array.isArray(keys) ? (keys as Record<string, unknown>) : {};
+  }
+
+  private write(file: SettingsFile): void {
+    writeFileSync(this.path, JSON.stringify(file, null, 2));
+  }
+
+  private read(): SettingsFile {
+    if (!existsSync(this.path)) return {};
     try {
       const value: unknown = JSON.parse(readFileSync(this.path, 'utf8'));
-      const file = typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-      const audio = file.audio === undefined ? DEFAULT_AUDIO_SETTINGS : parseAudioSettings(file.audio);
-      if (!audio) console.warn(`${this.path} has malformed audio settings; the system defaults are used.`);
-      return { file, audio: audio ?? DEFAULT_AUDIO_SETTINGS };
+      return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as SettingsFile) : {};
     } catch (err) {
-      console.warn(`${this.path} could not be read (${(err as Error).message}); the system defaults are used.`);
-      return { file: {}, audio: DEFAULT_AUDIO_SETTINGS };
+      console.warn(`${this.path} could not be read (${(err as Error).message}); the defaults are used.`);
+      return {};
     }
   }
 }

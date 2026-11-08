@@ -35,3 +35,14 @@
   justify-content: flex-end;
   gap: var(--space-2);
 }
+.modal__warning {
+  margin-block: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-1);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: var(--text-sm);
+}
+.modal__warning p {
+  margin: 0 0 var(--space-1);
+}
