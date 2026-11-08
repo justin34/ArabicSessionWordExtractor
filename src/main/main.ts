@@ -7,7 +7,7 @@ import { createApp, type App } from '../core/app';
 import { audioFileResponse } from '../core/audioFile';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
 import { readDetailModuleConfig } from '../core/details/wordDetails';
-import { KeyedSpeechToText, KeyedTranslator } from '../core/apiKeys';
+import { KeyedRecordedSpeechToText, KeyedSpeechToText, KeyedTranslator } from '../core/apiKeys';
 import { isApiKeyName, isReplayLayout, parseApiKey, parseAudioSettings, type SecretCodec } from '../core/settings';
 import { SqliteDictionary } from '../core/dictionary/sqlite';
 import type { ArabicAnalyzer, Dictionary } from '../core/providers';
@@ -169,7 +169,7 @@ function requireKeyName(value: unknown) {
   return value;
 }
 
-function registerIpc({ sessions, vocabulary, words, guides, anki, settings, apiKeys }: App): void {
+function registerIpc({ sessions, micTranscriptions, vocabulary, words, guides, anki, settings, apiKeys }: App): void {
   // Every window hears every live Session; the renderer picks the one it shows.
   sessions.subscribe((sessionId, update) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -181,6 +181,22 @@ function registerIpc({ sessions, vocabulary, words, guides, anki, settings, apiK
       win.webContents.send('transcript:failed', sessionId, message, track);
     }
   });
+  // "Transcribe my microphone": the job runs here, whatever screen the learner is on.
+  micTranscriptions.subscribe((sessionId, status) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('micTranscription:status', sessionId, status);
+    }
+  });
+  ipcMain.handle('micTranscription:status', (_event, id: unknown) => micTranscriptions.status(requireSessionId(id)));
+  ipcMain.handle('micTranscription:beginGated', (_event, id: unknown) =>
+    micTranscriptions.beginGatedAudio(requireSessionId(id)),
+  );
+  ipcMain.handle('micTranscription:appendGated', (_event, id: unknown, chunk: unknown) =>
+    micTranscriptions.appendGatedAudio(requireSessionId(id), requireChunk(chunk)),
+  );
+  ipcMain.handle('micTranscription:start', (_event, id: unknown, options: unknown) =>
+    micTranscriptions.start(requireSessionId(id), { gated: (options as { gated?: unknown } | undefined)?.gated === true }),
+  );
   ipcMain.handle('sessions:transcriptionFailure', (_event, id: unknown, track: unknown) =>
     sessions.transcriptionFailure(requireSessionId(id), track === 'mic' ? 'mic' : 'desktop') ?? null,
   );
@@ -391,6 +407,7 @@ void app.whenReady().then(() => {
     ankiFontPath: ankiFontPath(),
     providers: (keys) => ({
       speechToText: new KeyedSpeechToText(keys),
+      recordedSpeechToText: new KeyedRecordedSpeechToText(keys),
       translator: new KeyedTranslator(keys),
       arabicAnalyzer: arabicAnalyzerFromBundle(),
       dictionary: dictionaryFromBundle(),

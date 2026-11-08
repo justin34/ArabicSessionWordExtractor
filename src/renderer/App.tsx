@@ -12,6 +12,8 @@ import type {
   DesktopAudioCapture,
   ListedSession,
   MicAudioCapture,
+  MicRecordingGate,
+  MicTranscriptionStatus,
   LiveUtterance,
   ReadyUpdate,
   ReplayLayout,
@@ -43,6 +45,8 @@ export interface AppProps {
   micCapture: MicAudioCapture;
   /** Lists the audio inputs the Settings screen offers. */
   audioInputs: AudioInputs;
+  /** Applies the mic threshold to a stored Mic Track before "Transcribe my microphone" sends it. */
+  micRecordingGate: MicRecordingGate;
   /** Present only in dev builds; enables the Demo Session. */
   demoFeed?: DemoFeed;
 }
@@ -72,6 +76,9 @@ interface ActiveRecording {
   writeError: Error | null;
 }
 
+/** Shown while the Mic Track is gated here, before the main process has the job. */
+const PREPARING_NOTE = 'Preparing your speech…';
+
 /** The system's own devices: all system audio transcribed, the default microphone. */
 const SYSTEM_AUDIO: AudioSettings = { desktopSource: null, microphone: null };
 
@@ -81,7 +88,7 @@ function sortNewestFirst(list: ListedSession[]): ListedSession[] {
   );
 }
 
-export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppProps) {
+export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate, demoFeed }: AppProps) {
   const [route, setRoute] = useState<Route>({ name: 'sessions' });
   const [realSessions, setRealSessions] = useState<ListedSession[]>([]);
   const [demoSessions, setDemoSessions] = useState<ListedSession[]>([]);
@@ -104,6 +111,10 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
   const [readyUpdate, setReadyUpdate] = useState<ReadyUpdate | null>(null);
   /** How Replay shows Learner Utterances, for every Session (settings.json). */
   const [replayLayout, setReplayLayout] = useState<ReplayLayout>('together');
+  /** "Transcribe my microphone" by Session id: running, failed, or done this run. */
+  const [micTranscriptions, setMicTranscriptions] = useState<Record<number, MicTranscriptionStatus>>({});
+  /** Bumped when a Session's stored Transcript changes, so Replay loads it again. */
+  const [transcriptVersions, setTranscriptVersions] = useState<Record<number, number>>({});
   const active = useRef<ActiveRecording | null>(null);
   const starting = useRef(false);
   const demoCancels = useRef(new Map<number, Unsubscribe>());
@@ -140,6 +151,54 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
       current = false;
     };
   }, [bridge]);
+
+  const setMicTranscription = useCallback((sessionId: number, status: MicTranscriptionStatus) => {
+    setMicTranscriptions((m) => ({ ...m, [sessionId]: status }));
+    if (status.state === 'done') setTranscriptVersions((v) => ({ ...v, [sessionId]: (v[sessionId] ?? 0) + 1 }));
+  }, []);
+
+  // The job runs in the main process; it reports on every Session, whichever screen is open.
+  useEffect(() => bridge.subscribeMicTranscriptions(setMicTranscription), [bridge, setMicTranscription]);
+
+  /** The open Session's job may have started before this window last loaded. */
+  const replayId = route.name === 'replay' && !route.session.isDemo ? route.session.id : null;
+  useEffect(() => {
+    if (replayId === null) return;
+    let current = true;
+    bridge
+      .micTranscription(replayId)
+      .then((status) => current && status && setMicTranscriptions((m) => (m[replayId] ? m : { ...m, [replayId]: status })))
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [bridge, replayId]);
+
+  /**
+   * "Transcribe my microphone": with the mic threshold set, the Mic Track is gated here
+   * first and sent as a copy; the transcription itself runs in the main process.
+   */
+  async function transcribeMic(sessionId: number): Promise<void> {
+    setMicTranscription(sessionId, { state: 'running', note: PREPARING_NOTE });
+    try {
+      const threshold = (await bridge.audioSettings()).micThreshold;
+      let gated = false;
+      if (threshold !== undefined && threshold > 0) {
+        const chunks = await micRecordingGate.gate(bridge.micTrackUrl(sessionId), threshold);
+        await bridge.beginGatedMicRecording(sessionId);
+        for (const chunk of chunks) await bridge.appendGatedMicRecording(sessionId, chunk);
+        gated = true;
+      }
+      const status = await bridge.transcribeMicTrack(sessionId, { gated });
+      // The main process may already have told how it went.
+      setMicTranscriptions((m) => {
+        const shown = m[sessionId];
+        return shown?.state === 'running' && shown.note === PREPARING_NOTE ? { ...m, [sessionId]: status } : m;
+      });
+    } catch (err) {
+      setMicTranscription(sessionId, { state: 'failed', message: (err as Error).message || String(err) });
+    }
+  }
 
   /** Applies at once; saved for every Session afterwards. */
   function changeReplayLayout(layout: ReplayLayout): void {
@@ -510,6 +569,9 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
               audioUrl={bridge.desktopTrackUrl(route.session.id)}
               micAudioUrl={route.session.micTrackPath ? bridge.micTrackUrl(route.session.id) : undefined}
               loadTranscript={loadTranscript}
+              transcriptVersion={transcriptVersions[route.session.id] ?? 0}
+              micTranscription={micTranscriptions[route.session.id]}
+              onTranscribeMic={() => void transcribeMic(route.session.id)}
               loadWordDetails={loadWordDetails}
               loadGuide={loadSessionGuide}
               onOpenWord={openWordCard}

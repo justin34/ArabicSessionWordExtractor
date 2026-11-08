@@ -25,6 +25,21 @@ export interface SpeechToText {
   transcribe(audio: AsyncIterable<Uint8Array>): AsyncIterable<SttEvent>;
 }
 
+/** A recorded audio file on disk, e.g. a Session's Mic Track. */
+export interface RecordedAudio {
+  path: string;
+  /** Its media type, e.g. 'audio/webm' or 'audio/wav'. */
+  contentType: string;
+}
+
+/**
+ * Speech-to-text for a whole recording, after the fact: the file in, every recognized
+ * word out, timed from the start of the file.
+ */
+export interface RecordedSpeechToText {
+  transcribeFile(audio: RecordedAudio): Promise<SttWord[]>;
+}
+
 /** Sentence translation: Arabic sentence in, English sentence out. */
 export interface Translator {
   translate(arabic: string): Promise<string>;
@@ -96,6 +111,8 @@ export interface Dictionary {
 
 export interface Providers {
   speechToText: SpeechToText;
+  /** Transcribes a completed Session's Mic Track afterwards; without one, that fails saying so. */
+  recordedSpeechToText?: RecordedSpeechToText;
   translator: Translator;
   arabicAnalyzer: ArabicAnalyzer;
   dictionary: Dictionary;

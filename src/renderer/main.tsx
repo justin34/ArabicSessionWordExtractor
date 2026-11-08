@@ -5,6 +5,7 @@ import type { TranscriptionFailureListener, TranscriptListener } from '../core/t
 import type { Bridge, Unsubscribe } from './bridge';
 import { browserAudioInputs, browserDesktopAudio, browserMicAudio } from './browserCapture';
 import { demoFeedForBuild } from './demoFeed';
+import { browserMicRecordingGate } from './micRecordingGate';
 import './tokens.css';
 
 type PreloadApi = Omit<
@@ -39,6 +40,7 @@ createRoot(document.getElementById('root')!).render(
       capture={browserDesktopAudio}
       micCapture={browserMicAudio}
       audioInputs={browserAudioInputs}
+      micRecordingGate={browserMicRecordingGate}
       demoFeed={demoFeedForBuild(import.meta.env.DEV)}
     />
   </StrictMode>,

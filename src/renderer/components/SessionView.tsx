@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { ListedSession, ReplayLayout, SessionGuide, Utterance } from '../bridge';
+import type { ListedSession, MicTranscriptionStatus, ReplayLayout, SessionGuide, Utterance } from '../bridge';
 import { formatStart, sessionDuration } from '../format';
 import { useLoaded } from '../useLoaded';
 import { ReplayView, type ReplayShows } from './ReplayView';
@@ -30,6 +30,9 @@ export function SessionView({
   audioUrl,
   micAudioUrl,
   loadTranscript,
+  transcriptVersion = 0,
+  micTranscription,
+  onTranscribeMic,
   loadWordDetails,
   loadGuide,
   onOpenWord,
@@ -46,16 +49,31 @@ export function SessionView({
   /** The Mic Track, when the Session has one; played in sync with the Desktop Track. */
   micAudioUrl?: string;
   loadTranscript: (sessionId: number) => Promise<Utterance[]>;
+  /** Changes when the stored Transcript has, so it is loaded again. */
+  transcriptVersion?: number;
+  /** How "Transcribe my microphone" is going for this Session, if it was asked for. */
+  micTranscription?: MicTranscriptionStatus;
+  /** Transcribes the Mic Track afterwards; offered while the Session has one and no Learner Utterances. */
+  onTranscribeMic?: () => void;
   loadWordDetails: LoadWordDetails;
   loadGuide: (sessionId: number) => Promise<SessionGuide | null>;
   onOpenWord: (lemmaId: number) => void;
   onBack: () => void;
   anki: AnkiActions;
 }) {
-  const load = useCallback(() => loadTranscript(session.id), [loadTranscript, session.id]);
+  // A new transcriptVersion means the stored Transcript changed: load it again.
+  const load = useCallback(() => loadTranscript(session.id), [loadTranscript, session.id, transcriptVersion]);
   const transcript = useLoaded(load);
   const hasLearner = transcript.state === 'loaded' && transcript.value.some((u) => u.track === 'mic');
   const separate = hasLearner && layout === 'separate';
+  // Runs once: not after it has worked this run, nor while it runs.
+  const offerMicTranscription =
+    onTranscribeMic !== undefined &&
+    session.micTrackPath !== null &&
+    transcript.state === 'loaded' &&
+    !hasLearner &&
+    micTranscription?.state !== 'running' &&
+    micTranscription?.state !== 'done';
   // My Speech exists only while Separate; switching to Together shows it all on Replay.
   const shownTab: SessionTab = tab === 'my-speech' && !separate ? 'replay' : tab;
   const tabs: Array<{ id: SessionTab; label: string }> = [
@@ -77,6 +95,11 @@ export function SessionView({
       <header className="session-view__header">
         <h1>{formatStart(session.startedAt)}</h1>
         <span className="session-view__length">{sessionDuration(session, Date.now())}</span>
+        {offerMicTranscription && (
+          <button type="button" className="btn session-view__transcribe-mic" onClick={onTranscribeMic}>
+            Transcribe my microphone
+          </button>
+        )}
         {hasLearner && (
           <div className="session-view__layout" role="radiogroup" aria-label="Show my speech">
             {LAYOUTS.map((l) => (
@@ -94,6 +117,21 @@ export function SessionView({
           </div>
         )}
       </header>
+      {micTranscription?.state === 'running' && (
+        <p className="session-view__mic-note" role="status">
+          {micTranscription.note}
+        </p>
+      )}
+      {micTranscription?.state === 'failed' && (
+        <p className="session-view__mic-note session-view__mic-note--failed" role="alert">
+          Could not transcribe your speech: {micTranscription.message}
+        </p>
+      )}
+      {micTranscription?.state === 'done' && !hasLearner && transcript.state === 'loaded' && (
+        <p className="session-view__mic-note" role="status">
+          No speech was found on your microphone.
+        </p>
+      )}
       <div className="session-view__tabs" role="tablist" aria-label="Session">
         {tabs.map((t) => (
           <button

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { ReadyUpdate, TranscriptionFailureListener, TranscriptListener } from '../core/types';
+import type { MicTranscriptionListener, ReadyUpdate, TranscriptionFailureListener, TranscriptListener } from '../core/types';
 
 contextBridge.exposeInMainWorld('api', {
   startSession: (options?: { mic: boolean; transcribeMic?: boolean; gateMic?: boolean }) => ipcRenderer.invoke('sessions:start', options),
@@ -9,6 +9,19 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('sessions:appendMicAudio', sessionId, chunk),
   appendGatedMicAudio: (sessionId: number, chunk: Uint8Array) =>
     ipcRenderer.invoke('sessions:appendGatedMicAudio', sessionId, chunk),
+  micTranscription: (sessionId: number) => ipcRenderer.invoke('micTranscription:status', sessionId),
+  beginGatedMicRecording: (sessionId: number) => ipcRenderer.invoke('micTranscription:beginGated', sessionId),
+  appendGatedMicRecording: (sessionId: number, chunk: Uint8Array) =>
+    ipcRenderer.invoke('micTranscription:appendGated', sessionId, chunk),
+  transcribeMicTrack: (sessionId: number, options?: { gated?: boolean }) =>
+    ipcRenderer.invoke('micTranscription:start', sessionId, options),
+  /** How each "Transcribe my microphone" job is going; returns an unsubscribe. */
+  subscribeMicTranscriptions: (listener: MicTranscriptionListener) => {
+    const handler = (_event: IpcRendererEvent, ...[id, status]: Parameters<MicTranscriptionListener>) =>
+      listener(id, status);
+    ipcRenderer.on('micTranscription:status', handler);
+    return () => void ipcRenderer.removeListener('micTranscription:status', handler);
+  },
   stopSession: (sessionId: number) => ipcRenderer.invoke('sessions:stop', sessionId),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   transcript: (sessionId: number) => ipcRenderer.invoke('sessions:transcript', sessionId),

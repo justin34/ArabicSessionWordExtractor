@@ -135,7 +135,18 @@ export type ApiKeyCheck = { ok: true; message: string } | { ok: false; problem: 
  */
 export type TranscriptionFailureListener = (sessionId: number, message: string, track: Track) => void;
 
-export type TranscriptListener = (sessionId: number, update: LiveUtterance) => void;
+/**
+ * "Transcribe my microphone" for a completed Session: `running` with a progress note,
+ * `failed` with why (the button stays), or `done` once its Learner Utterances are stored.
+ */
+export type MicTranscriptionStatus =
+  | { state: 'running'; note: string }
+  | { state: 'failed'; message: string }
+  | { state: 'done' };
+
+export type MicTranscriptionListener = (sessionId: number, status: MicTranscriptionStatus) => void;
+
+export type TranscriptListener =(sessionId: number, update: LiveUtterance) => void;
 
 /** One labelled fact in a Detail Module's section, e.g. root ك.ت.ب. */
 export interface DetailFact {

@@ -20,6 +20,23 @@
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
+/* "Transcribe my microphone", for a Session with a Mic Track and no Learner Utterances. */
+.session-view__transcribe-mic {
+  margin-inline-start: auto;
+  align-self: center;
+}
+.session-view__mic-note {
+  margin-block-end: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-1);
+  background: var(--color-learner-bg);
+  color: var(--color-learner);
+  font-size: var(--text-sm);
+}
+.session-view__mic-note--failed {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
 /* Together · Separate: how Learner Utterances are shown. */
 .session-view__layout {
   display: inline-flex;
