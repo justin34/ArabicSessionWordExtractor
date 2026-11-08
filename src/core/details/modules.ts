@@ -80,7 +80,7 @@ export function readablePartOfSpeech(pos: string): string {
 }
 
 /** CAMeL marks words without a true root (particles, loanwords) with # radicals. */
-function learnableRoot(root: string | null): string | null {
+export function learnableRoot(root: string | null): string | null {
   return root && !root.includes('#') ? root : null;
 }
 

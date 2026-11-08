@@ -193,3 +193,12 @@ export interface SessionGuide {
   /** Lemmas first heard in this Session, grouped by part of speech, in the order heard. */
   groups: SessionGuideGroup[];
 }
+
+/** What "Export to Anki" exports: every Lemma of the Vocabulary, or one Session's new Lemmas. */
+export type AnkiExportTarget = { kind: 'vocabulary' } | { kind: 'session'; sessionId: number };
+
+/** A finished export: how many words it holds and where it was saved. */
+export interface AnkiExportResult {
+  count: number;
+  path: string;
+}
