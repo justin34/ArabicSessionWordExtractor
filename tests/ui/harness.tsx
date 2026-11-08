@@ -18,6 +18,7 @@ import {
   type LiveUtterance,
   type MicAudioCapture,
 } from '../../src/renderer/bridge';
+import type { BundleProblem, ReadyUpdate } from '../../src/core/types';
 import type { Session, SessionGuide, Utterance, VocabularyEntry, WordCard, WordDetails } from '../../src/core/types';
 
 export function session(over: Partial<Session> & { id: number }): Session {
@@ -74,6 +75,13 @@ export class FakeBridge implements Bridge {
   shownFiles: string[] = [];
   /** Why each Session's speech-to-text stopped, as the main process would say. */
   failures = new Map<number, string>();
+  /** Bundled parts the packaged build is missing, as the main process would say. */
+  problems: BundleProblem[] = [];
+  /** The update downloaded before the window opened, if any. */
+  update: ReadyUpdate | null = null;
+  restarts = 0;
+  restartError: Error | null = null;
+  private updateListeners = new Set<(update: ReadyUpdate) => void>();
   private listeners = new Map<number, (u: LiveUtterance) => void>();
   private failureListeners = new Map<number, (message: string) => void>();
   private nextId: number;
@@ -184,6 +192,25 @@ export class FakeBridge implements Bridge {
   }
   async dictionaryNotice() {
     return this.notice;
+  }
+  async bundleProblems() {
+    return this.problems;
+  }
+  async readyUpdate() {
+    return this.update;
+  }
+  subscribeUpdateReady(onReady: (update: ReadyUpdate) => void) {
+    this.updateListeners.add(onReady);
+    return () => void this.updateListeners.delete(onReady);
+  }
+  /** Plays the main process telling the renderer an update has downloaded. */
+  downloadUpdate(version: string) {
+    this.update = { version };
+    for (const l of this.updateListeners) l(this.update);
+  }
+  async restartToUpdate() {
+    if (this.restartError) throw this.restartError;
+    this.restarts++;
   }
   async transcriptionFailure(sessionId: number) {
     return this.failures.get(sessionId) ?? null;

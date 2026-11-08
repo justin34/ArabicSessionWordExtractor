@@ -1,6 +1,8 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, protocol, safeStorage, session, shell } from 'electron';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { autoUpdater } from 'electron-updater';
 import { createApp, type App } from '../core/app';
 import { audioFileResponse } from '../core/audioFile';
 import { CamelArabicAnalyzer, camelHelperCommand } from '../core/analysis/camel';
@@ -9,14 +11,38 @@ import { KeyedSpeechToText, KeyedTranslator } from '../core/apiKeys';
 import { isApiKeyName, parseApiKey, parseAudioSettings, type SecretCodec } from '../core/settings';
 import { SqliteDictionary } from '../core/dictionary/sqlite';
 import type { ArabicAnalyzer, Dictionary } from '../core/providers';
-import { FakeArabicAnalyzer, FakeDictionary } from '../core/fakes';
-import type { AnkiExportResult, AnkiExportTarget } from '../core/types';
+import { DEV_DATA_FOLDER } from '../core/appIdentity';
+import { analyzerFallback, checkBundle, dictionaryFallback, type Fallback } from '../core/bundle';
+import type { AnkiExportResult, AnkiExportTarget, BundleProblem, ReadyUpdate } from '../core/types';
 
 const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
 
 let core: App | undefined;
 let analyzer: CamelArabicAnalyzer | undefined;
 let dictionary: SqliteDictionary | undefined;
+/** Bundled parts a packaged build is missing, told to the learner (GLOSSARY: Installer). */
+const bundleProblems: BundleProblem[] = [];
+/** The update downloaded in the background, once there is one. */
+let readyUpdate: ReadyUpdate | null = null;
+
+/**
+ * `--self-check=<file>`: the release script launches the packaged build this way. It checks
+ * the bundled helper and dictionary, writes the result to <file> as JSON and exits, without
+ * a window or the learner's data.
+ */
+const selfCheckFile = process.argv.find((a) => a.startsWith('--self-check='))?.slice('--self-check='.length);
+
+if (selfCheckFile) {
+  app.setPath('userData', mkdtempSync(join(tmpdir(), 'self-check-')));
+} else if (!app.isPackaged) {
+  // Development runs keep their own data folder, apart from a packaged build's.
+  app.setPath('userData', join(app.getPath('appData'), DEV_DATA_FOLDER));
+}
+
+function fallBack<T>(fallback: Fallback<T>): T {
+  if (fallback.problem) bundleProblems.push(fallback.problem);
+  return fallback.provider;
+}
 
 function requireSessionId(value: unknown): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
@@ -68,7 +94,7 @@ function arabicAnalyzerFromBundle(): ArabicAnalyzer {
   const helper = camelHelperCommand(bundleDir, script);
   if (!existsSync(helper.command)) {
     console.warn(`No Arabic analysis helper in ${bundleDir} (npm run build:helper): words are not analyzed.`);
-    return new FakeArabicAnalyzer();
+    return fallBack(analyzerFallback(app.isPackaged));
   }
   analyzer = new CamelArabicAnalyzer({ helper });
   analyzer.start();
@@ -78,7 +104,7 @@ function arabicAnalyzerFromBundle(): ArabicAnalyzer {
 /**
  * The bundled dictionary (GLOSSARY, Dictionary plan): built into vendor/dictionary by
  * `npm run build:dictionary`, and shipped as resources/dictionary in packaged builds.
- * Without it, words are glossed by the analyzer's stem gloss alone.
+ * Without it, words are glossed by the analyzer's stem gloss alone; a packaged build also says so.
  */
 function dictionaryDir(): string {
   return app.isPackaged ? join(process.resourcesPath, 'dictionary') : join(app.getAppPath(), 'vendor', 'dictionary');
@@ -88,14 +114,14 @@ function dictionaryFromBundle(): Dictionary {
   const path = join(dictionaryDir(), 'dictionary.db');
   if (!existsSync(path)) {
     console.warn(`No dictionary at ${path} (npm run build:dictionary): glosses come from the analyzer only.`);
-    return new FakeDictionary();
+    return fallBack(dictionaryFallback(app.isPackaged));
   }
   try {
     dictionary = new SqliteDictionary(path);
     return dictionary;
   } catch (err) {
     console.warn(`Dictionary at ${path} is unusable (${(err as Error).message}): rebuild it.`);
-    return new FakeDictionary();
+    return fallBack(dictionaryFallback(app.isPackaged));
   }
 }
 
@@ -167,6 +193,16 @@ function registerIpc({ sessions, vocabulary, words, guides, anki, settings, apiK
   });
   ipcMain.handle('settings:checkApiKey', (_event, name: unknown) => apiKeys.check(requireKeyName(name)));
   ipcMain.handle('credits:dictionaryNotice', () => dictionaryNotice());
+  ipcMain.handle('app:bundleProblems', () => bundleProblems);
+  ipcMain.handle('update:ready', () => readyUpdate);
+  // The renderer hides "Restart to update" while recording; this refuses it then too.
+  ipcMain.handle('update:restart', () => {
+    if (!readyUpdate) throw new Error('No update is ready');
+    if (sessions.list().some((s) => s.status === 'recording')) {
+      throw new Error('Stop the Session that is recording first.');
+    }
+    void shutDown().finally(() => autoUpdater.quitAndInstall());
+  });
   ipcMain.handle('sessions:start', (_event, options: unknown) =>
     sessions.start('webm', { mic: (options as { mic?: unknown } | undefined)?.mic === true }),
   );
@@ -295,7 +331,43 @@ function loadDevEnvFile(): void {
   if (existsSync(path)) process.loadEnvFile(path);
 }
 
+/**
+ * Packaged builds update themselves from GitHub Releases (GLOSSARY: Installer; ADR 0003): a
+ * check on launch, a download in the background, then "Restart to update" in the renderer.
+ * An update the learner does not restart for installs when the app quits. A failed check
+ * or download is only logged.
+ */
+function checkForUpdates(): void {
+  if (!app.isPackaged) return;
+  autoUpdater.logger = console;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('error', (err) => console.warn(`Update failed: ${err.message}`));
+  autoUpdater.on('update-downloaded', ({ version }) => {
+    readyUpdate = { version };
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send('update:downloaded', readyUpdate);
+  });
+  autoUpdater.checkForUpdates().catch((err: Error) => console.warn(`Update check failed: ${err.message}`));
+}
+
+/** The release script's check of a packaged build; see `selfCheckFile`. */
+async function runSelfCheck(file: string): Promise<void> {
+  let ok = false;
+  try {
+    const result = await checkBundle(arabicAnalyzerFromBundle(), dictionaryFromBundle());
+    ok = bundleProblems.length === 0 && result.analysis === null && result.dictionary === null;
+    writeFileSync(file, JSON.stringify({ ok, ...result, problems: bundleProblems.map((p) => p.message) }, null, 2));
+  } catch (err) {
+    writeFileSync(file, JSON.stringify({ ok: false, error: (err as Error).message }, null, 2));
+  } finally {
+    analyzer?.close();
+    dictionary?.close();
+    app.exit(ok ? 0 : 1);
+  }
+}
+
 void app.whenReady().then(() => {
+  if (selfCheckFile) return runSelfCheck(selfCheckFile);
   loadDevEnvFile();
   const dataDir = app.getPath('userData');
   core = createApp({
@@ -317,18 +389,26 @@ void app.whenReady().then(() => {
   serveSessionAudio(core);
   allowDesktopAudioCapture();
   createWindow();
+  checkForUpdates();
 });
 
-app.on('window-all-closed', () => {
-  // Complete any Session still recording before the database closes.
-  // The helper shuts down with the app.
-  // Word Cards being rebuilt are finished first, too.
-  void (core?.sessions.stopAll() ?? Promise.resolve())
+/**
+ * Completes any Session still recording before the database closes, and finishes Word
+ * Cards being rebuilt. The helper shuts down with the app.
+ */
+let shuttingDown: Promise<void> | undefined;
+function shutDown(): Promise<void> {
+  shuttingDown ??= (core?.sessions.stopAll() ?? Promise.resolve())
     .then(() => core?.guides.idle())
     .then(() => analyzer?.close())
     .finally(() => {
       core?.close();
       dictionary?.close();
-      app.quit();
     });
+  return shuttingDown;
+}
+
+app.on('window-all-closed', () => {
+  if (selfCheckFile) return;
+  void shutDown().finally(() => app.quit());
 });

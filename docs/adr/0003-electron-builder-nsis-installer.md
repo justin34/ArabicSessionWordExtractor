@@ -1,6 +1,6 @@
 # 0003 — electron-builder NSIS Installer with electron-updater
 
-**Status:** accepted (v1); to be built in #36
+**Status:** accepted (v1); built in #36
 
 ## Context
 The app goes to other learners as a Windows x64 Installer from GitHub Releases. The Installer must install for the current user without admin, show the GPL-2.0-or-later licence, let the learner choose the install folder, offer "Also delete my recordings and vocabulary" (unticked) on uninstall, and update itself from GitHub Releases without ever restarting during a recording.

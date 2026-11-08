@@ -253,6 +253,16 @@ describe('Exporting the Vocabulary to Anki', () => {
 });
 
 describe('Re-importing an export', () => {
+  // Pinned: Anki matches a re-import by these, so changing any of them duplicates every
+  // note the learner imported. They were set once, at the rename (#36).
+  it('keeps the note type, deck and GUIDs fixed since the rename to Arabic Session Word Extractor', () => {
+    expect(NOTE_TYPE_ID).toBe(1794096000001);
+    expect(NOTE_TYPE_NAME).toBe('Arabic Session Word Extractor — Arabic Word');
+    expect(DECK_ID).toBe(1794096000002);
+    expect(DECK_NAME).toBe('Arabic Session Word Extractor - Vocabulary');
+    expect(noteGuid('كَتَب')).toBe('dRFTe2SAx2hkQWdI');
+  });
+
   it('gives each note the same GUID and ids every time, from its Lemma', async () => {
     const app = await recorded([{ script: first, at: SESSION_1 }]);
     await app.anki.export({ kind: 'vocabulary' }, join(out, 'a.apkg'));

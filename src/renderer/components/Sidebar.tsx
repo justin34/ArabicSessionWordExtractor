@@ -1,3 +1,4 @@
+import { APP_NAME } from '../../core/appIdentity';
 import './Sidebar.css';
 
 export type Destination = 'sessions' | 'vocabulary' | 'settings' | 'credits';
@@ -18,7 +19,7 @@ export function Sidebar({
 }) {
   return (
     <nav className="sidebar" aria-label="Main">
-      <div className="sidebar__brand">Arabic Listening</div>
+      <div className="sidebar__brand">{APP_NAME}</div>
       <ul className="sidebar__list">
         {ITEMS.map((item) => (
           <li key={item.id}>

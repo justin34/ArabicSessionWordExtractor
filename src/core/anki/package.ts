@@ -12,10 +12,15 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { zip } from './zip';
 
-export const NOTE_TYPE_ID = 1762473600001;
-export const NOTE_TYPE_NAME = 'Interactive Language Learning — Arabic Word';
-export const DECK_ID = 1762473600002;
-export const DECK_NAME = 'Arabic Vocabulary';
+// These ids, and the GUID salt below, were set when the app was renamed to Arabic Session
+// Word Extractor (#36). Never change them again: Anki matches a re-import to the learner's
+// note type, deck and notes by them, so new ones would duplicate everything already imported.
+export const NOTE_TYPE_ID = 1794096000001;
+export const NOTE_TYPE_NAME = 'Arabic Session Word Extractor — Arabic Word';
+export const DECK_ID = 1794096000002;
+export const DECK_NAME = 'Arabic Session Word Extractor - Vocabulary';
+/** What each note's GUID hash starts with; fixed, like the ids above. */
+const GUID_SALT = 'arabic-session-word-extractor:';
 
 /** The note type's fields, in order; `Lemma` is the sort field. */
 export const FIELDS = [
@@ -86,7 +91,7 @@ const BACK = `<div class="arabic lemma" lang="ar" dir="rtl">{{Lemma}}</div>
 
 /** A note's GUID: a hash of its Lemma, the same in every export. */
 export function noteGuid(key: string): string {
-  return createHash('sha256').update(`interactive-language-learning:${key.normalize('NFC')}`).digest('base64url').slice(0, 16);
+  return createHash('sha256').update(GUID_SALT + key.normalize('NFC')).digest('base64url').slice(0, 16);
 }
 
 /** A stable positive id below 2^53 from a string, for note and card ids. */

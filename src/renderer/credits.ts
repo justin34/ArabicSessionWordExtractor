@@ -146,6 +146,15 @@ export const CREDITS: CreditGroup[] = [
         url: 'https://github.com/notofonts/arabic',
         files: ['noto-naskh-arabic-OFL-1.1.txt'],
       },
+      {
+        name: 'Arabic icon',
+        use: 'The app’s icon. The one bundled asset not under an open licence.',
+        by: 'Magnific - Flaticon',
+        licence: 'Flaticon free licence (with attribution)',
+        url: 'https://www.flaticon.com/free-icons/arabic',
+        files: ['flaticon-arabic-icon.txt'],
+        note: 'Arabic icons created by Magnific - Flaticon.',
+      },
     ],
   },
   {

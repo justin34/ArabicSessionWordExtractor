@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { APP_NAME } from '../../core/appIdentity';
 import { CREDITS, LICENSE_TEXTS, type Credit } from '../credits';
 import { ScreenHeader } from './ScreenHeader';
 import './CreditsView.css';
@@ -58,8 +59,10 @@ export function CreditsView({ loadDictionaryNotice }: { loadDictionaryNotice: ()
     <>
       <ScreenHeader title="Credits and licences" />
       <div className="credits">
+        <h2 className="credits__app">{APP_NAME}</h2>
         <p className="credits__intro">
-          This app is built on open data and open-source software. Thank you to everyone who made them.
+          Free software under the GNU General Public License, version 2 or later. It is built on open data
+          and open-source software. Thank you to everyone who made them.
         </p>
         {CREDITS.map((group) => (
           <section key={group.title} className="credits__group" aria-labelledby={`credits-${group.title}`}>

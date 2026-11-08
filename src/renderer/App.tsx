@@ -6,11 +6,13 @@ import type {
   AudioInputs,
   AudioSettings,
   Bridge,
+  BundleProblem,
   DemoFeed,
   DesktopAudioCapture,
   ListedSession,
   MicAudioCapture,
   LiveUtterance,
+  ReadyUpdate,
   Unsubscribe,
   VocabularyEntry,
 } from './bridge';
@@ -90,6 +92,9 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
   const [activeId, setActiveId] = useState<number | null>(null);
   const [vocabulary, setVocabulary] = useState<VocabularyEntry[] | null>(null);
   const [vocabularyQuery, setVocabularyQuery] = useState('');
+  /** What a packaged build is missing (GLOSSARY: Installer); told until it is reinstalled. */
+  const [bundleProblems, setBundleProblems] = useState<BundleProblem[]>([]);
+  const [readyUpdate, setReadyUpdate] = useState<ReadyUpdate | null>(null);
   const active = useRef<ActiveRecording | null>(null);
   const starting = useRef(false);
   const demoCancels = useRef(new Map<number, Unsubscribe>());
@@ -104,6 +109,31 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    let current = true;
+    bridge
+      .bundleProblems()
+      .then((problems) => current && setBundleProblems(problems))
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [bridge]);
+
+  // An update can finish downloading before or after the window opens.
+  useEffect(() => {
+    let current = true;
+    const off = bridge.subscribeUpdateReady((u) => current && setReadyUpdate(u));
+    bridge
+      .readyUpdate()
+      .then((u) => current && u && setReadyUpdate((shown) => shown ?? u))
+      .catch(() => undefined);
+    return () => {
+      current = false;
+      off();
+    };
+  }, [bridge]);
 
   const pushUpdate = useCallback((key: string, u: LiveUtterance) => {
     setTranscripts((t) => ({ ...t, [key]: applyUpdate(t[key] ?? [], u) }));
@@ -321,6 +351,11 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
       .catch(() => setStartDevices(SYSTEM_AUDIO));
   }
 
+  // "Restart to update" never shows while a Session records, in this window or another.
+  const recording = activeId !== null || realSessions.some((s) => s.status === 'recording');
+  const restartToUpdate = () =>
+    void bridge.restartToUpdate().catch((err: Error) => setNotice(`Could not restart to update: ${err.message}`));
+
   const goSessions = () => setRoute({ name: 'sessions' });
   const sidebarActive = destinationOf(route);
   const liveSession =
@@ -357,6 +392,19 @@ export function App({ bridge, capture, micCapture, audioInputs, demoFeed }: AppP
     <div className="app">
       <Sidebar active={sidebarActive} onNavigate={(d) => setRoute({ name: d })} />
       <main className="app__main">
+        {bundleProblems.map((p) => (
+          <div key={p.part} className="notice" role="alert">
+            <span>{p.message}</span>
+          </div>
+        ))}
+        {readyUpdate && !recording && (
+          <div className="notice notice--update" role="status">
+            <span>Version {readyUpdate.version} is ready to install.</span>
+            <button type="button" className="btn btn--primary" onClick={restartToUpdate}>
+              Restart to update
+            </button>
+          </div>
+        )}
         {notice && (
           <div className="notice" role="alert">
             <span>{notice}</span>
