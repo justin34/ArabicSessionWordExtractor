@@ -49,6 +49,10 @@ export class FakeBridge implements Bridge {
   startOptions: Array<StartOptions | undefined> = [];
   appendError: Error | null = null;
   vocabulary: VocabularyEntry[] = [];
+  /** Ignored Lemma ids, as the store keeps them; each change asked for is recorded. */
+  ignored = new Set<number>();
+  ignoreCalls: Array<{ lemmaId: number; ignored: boolean }> = [];
+  ignoreError: Error | null = null;
   /** Word panel content by Lemma id. */
   details = new Map<number, WordDetails>();
   detailsError: Error | null = null;
@@ -180,12 +184,19 @@ export class FakeBridge implements Bridge {
     return `session-audio://mic/${sessionId}`;
   }
   async listVocabulary() {
-    return [...this.vocabulary];
+    return this.vocabulary.map((e) => ({ ...e, ignored: this.ignored.has(e.lemmaId) }));
+  }
+  async setIgnored(lemmaId: number, ignored: boolean) {
+    this.ignoreCalls.push({ lemmaId, ignored });
+    if (this.ignoreError) throw this.ignoreError;
+    if (ignored) this.ignored.add(lemmaId);
+    else this.ignored.delete(lemmaId);
   }
   async wordDetails(lemmaId: number, surface?: string) {
     this.detailRequests.push({ lemmaId, surface });
     if (this.detailsError) throw this.detailsError;
-    return this.details.get(lemmaId) ?? null;
+    const details = this.details.get(lemmaId);
+    return details ? { ...details, ignored: this.ignored.has(lemmaId) } : null;
   }
   async wordCard(lemmaId: number) {
     this.calls.push(`wordCard:${lemmaId}`);
@@ -194,7 +205,13 @@ export class FakeBridge implements Bridge {
   async sessionGuide(sessionId: number) {
     this.calls.push(`sessionGuide:${sessionId}`);
     if (this.guideError) throw this.guideError;
-    return this.sessionGuides.get(sessionId) ?? null;
+    const guide = this.sessionGuides.get(sessionId);
+    if (!guide) return null;
+    // As the store shows it: Ignored Lemmas left out, and groups they emptied.
+    const groups = guide.groups
+      .map((g) => ({ ...g, words: g.words.filter((w) => !this.ignored.has(w.lemmaId)) }))
+      .filter((g) => g.words.length > 0);
+    return { ...guide, groups };
   }
   async audioSettings() {
     return this.audio;

@@ -393,3 +393,70 @@ describe('Edge cases', () => {
     expect(readdirSync(out)).toEqual(['deck.apkg']);
   });
 });
+
+describe('Ignored Lemmas', () => {
+  const idOf = (app: App, lemma: string) => app.vocabulary.list().find((e) => e.lemma === lemma)!.lemmaId;
+  const guideLemmas = (app: App, sessionId: number) =>
+    app.guides.sessionGuide(sessionId)!.groups.flatMap((g) => g.words.map((w) => w.lemma));
+  const exported = async (app: App, target: Parameters<App['anki']['export']>[0]) => {
+    const path = join(out, `deck-${Math.random()}.apkg`);
+    await app.anki.export(target, path);
+    return openPackage(path).notes.map((n) => n.fields.Lemma).sort();
+  };
+
+  it('leaves an Ignored Lemma out of both exports and the Session Guide, and Stop ignoring brings it back', async () => {
+    const app = await recorded([{ script: first, at: SESSION_1 }]);
+    const sessionId = app.sessions.list()[0].id;
+    const katab = idOf(app, 'كَتَب');
+
+    app.vocabulary.setIgnored(katab, true);
+
+    expect(await exported(app, { kind: 'vocabulary' })).toEqual(['دَرْس']);
+    expect(await exported(app, { kind: 'session', sessionId })).toEqual(['دَرْس']);
+    expect(guideLemmas(app, sessionId)).toEqual(['دَرْس']);
+    // Still in the Vocabulary, marked, with its Word Card and details.
+    expect(app.vocabulary.list().find((e) => e.lemmaId === katab)).toMatchObject({ ignored: true, count: 1 });
+    expect(app.guides.wordCard(katab)).toBeDefined();
+    expect((await app.words.details(katab))?.ignored).toBe(true);
+
+    app.vocabulary.setIgnored(katab, false);
+
+    expect(await exported(app, { kind: 'vocabulary' })).toEqual(['دَرْس', 'كَتَب'].sort());
+    expect(await exported(app, { kind: 'session', sessionId })).toEqual(['دَرْس', 'كَتَب'].sort());
+    expect(guideLemmas(app, sessionId).sort()).toEqual(['دَرْس', 'كَتَب'].sort());
+    expect((await app.words.details(katab))?.ignored).toBe(false);
+  });
+
+  it('records it when heard again without un-ignoring it, across a restart', async () => {
+    let app = await recorded([{ script: first, at: SESSION_1 }]);
+    const katab = idOf(app, 'كَتَب');
+    app.vocabulary.setIgnored(katab, true);
+
+    app = await recorded([{ script: second, at: SESSION_2 }]);
+
+    expect(app.vocabulary.list().find((e) => e.lemmaId === katab)).toMatchObject({
+      ignored: true,
+      count: 2,
+      surfaceForms: ['كتبوا', 'كتب'],
+    });
+    const sessionTwo = app.sessions.list().find((s) => s.startedAt === SESSION_2)!.id;
+    const heard = app.sessions.transcript(sessionTwo)[0].tokens.find((t) => t.surface === 'كتب')!;
+    expect(heard).toMatchObject({ lemmaId: katab });
+    expect(heard.gloss).not.toBe('');
+    expect(await exported(app, { kind: 'vocabulary' })).toEqual(['دَرْس', 'طالِب'].sort());
+
+    app.vocabulary.setIgnored(katab, false);
+    expect(await exported(app, { kind: 'vocabulary' })).toEqual(['دَرْس', 'طالِب', 'كَتَب'].sort());
+  });
+
+  it('refuses an export when every word is ignored, and an unknown Lemma', async () => {
+    const app = await recorded([{ script: first, at: SESSION_1 }]);
+    for (const e of app.vocabulary.list()) app.vocabulary.setIgnored(e.lemmaId, true);
+
+    await expect(app.anki.export({ kind: 'vocabulary' }, join(out, 'deck.apkg'))).rejects.toThrow(
+      'Every word in your Vocabulary is ignored.',
+    );
+    expect(readdirSync(out)).toEqual([]);
+    expect(() => app.vocabulary.setIgnored(9999, true)).toThrow('not in the Vocabulary');
+  });
+});

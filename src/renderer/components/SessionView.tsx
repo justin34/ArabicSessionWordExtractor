@@ -5,7 +5,7 @@ import { useLoaded } from '../useLoaded';
 import { ReplayView, type ReplayShows } from './ReplayView';
 import type { AnkiActions } from './AnkiExport';
 import { SessionGuideView } from './SessionGuideView';
-import type { LoadWordDetails } from './WordPanel';
+import type { LoadWordDetails, SetIgnored } from './WordPanel';
 import './SessionView.css';
 
 export type SessionTab = 'replay' | 'my-speech' | 'guide';
@@ -36,6 +36,7 @@ export function SessionView({
   loadWordDetails,
   loadGuide,
   onOpenWord,
+  onSetIgnored,
   onBack,
   anki,
 }: {
@@ -58,6 +59,8 @@ export function SessionView({
   loadWordDetails: LoadWordDetails;
   loadGuide: (sessionId: number) => Promise<SessionGuide | null>;
   onOpenWord: (lemmaId: number) => void;
+  /** Ignores a word from the word panel or the Session Guide, or stops ignoring it. */
+  onSetIgnored?: SetIgnored;
   onBack: () => void;
   anki: AnkiActions;
 }) {
@@ -162,6 +165,7 @@ export function SessionView({
           micAudioUrl={micAudioUrl}
           fallbackDurationMs={lengthMs}
           loadWordDetails={loadWordDetails}
+          onSetIgnored={onSetIgnored}
         />
       </div>
       {shownTab === 'guide' && (
@@ -171,7 +175,13 @@ export function SessionView({
           aria-labelledby="session-tab-guide"
           className="session-view__panel"
         >
-          <SessionGuideView sessionId={session.id} loadGuide={loadGuide} onOpenWord={onOpenWord} anki={anki} />
+          <SessionGuideView
+            sessionId={session.id}
+            loadGuide={loadGuide}
+            onOpenWord={onOpenWord}
+            onSetIgnored={onSetIgnored}
+            anki={anki}
+          />
         </div>
       )}
     </div>

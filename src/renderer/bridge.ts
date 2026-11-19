@@ -69,6 +69,8 @@ export interface Bridge {
   micTrackUrl(sessionId: number): string;
   /** The whole Vocabulary, most recently first heard first. */
   listVocabulary(): Promise<VocabularyEntry[]>;
+  /** Ignores a Lemma (GLOSSARY: Ignored Lemma), or stops ignoring it with false. */
+  setIgnored(lemmaId: number, ignored: boolean): Promise<void>;
   /** The word panel's Detail Module sections for a Lemma; null when it is not in the Vocabulary. */
   wordDetails(lemmaId: number, surface?: string): Promise<WordDetails | null>;
   /** A Lemma's Word Card; null when it has none. */

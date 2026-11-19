@@ -58,7 +58,7 @@ describe('Session Guide', () => {
     expect(await screen.findByRole('tabpanel', { name: 'Session Guide' })).toBeTruthy();
     expect(await screen.findByText('3 new words · 5 words heard')).toBeTruthy();
     const nouns = screen.getByRole('region', { name: 'Nouns' });
-    expect(within(nouns).getAllByRole('button').map((b) => b.textContent)).toEqual([
+    expect(within(nouns).getAllByRole('button', { name: /^Word Card for/ }).map((b) => b.textContent)).toEqual([
       'طالِبstudentheard 2 times',
       'دَرْسlessonheard once',
     ]);
@@ -116,6 +116,7 @@ describe('Word Card from the Vocabulary', () => {
     firstHeardAt: '2026-01-01T10:01:00.000Z',
     count: 1,
     heardIn: [{ sessionId: 1, utteranceId: 1 }],
+    ignored: false,
   };
 
   it('opens from a Vocabulary entry and goes back to the Vocabulary', async () => {

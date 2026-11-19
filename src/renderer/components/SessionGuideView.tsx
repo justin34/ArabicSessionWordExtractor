@@ -3,6 +3,7 @@ import type { SessionGuide } from '../bridge';
 import { useLoaded } from '../useLoaded';
 import { useAnkiExport, type AnkiActions } from './AnkiExport';
 import { EmptyState } from './EmptyState';
+import type { SetIgnored } from './WordPanel';
 import './StudyGuides.css';
 
 const times = (n: number) => (n === 1 ? 'once' : `${n} times`);
@@ -21,15 +22,20 @@ export function SessionGuideView({
   sessionId,
   loadGuide,
   onOpenWord,
+  onSetIgnored,
   anki,
 }: {
   sessionId: number;
+  /** The guide as shown: its Ignored Lemmas already left out. */
   loadGuide: (sessionId: number) => Promise<SessionGuide | null>;
   onOpenWord: (lemmaId: number) => void;
+  /** Offers Ignore on each word; an ignored word leaves the guide. */
+  onSetIgnored?: SetIgnored;
   anki: AnkiActions;
 }) {
   const load = useCallback(() => loadGuide(sessionId), [loadGuide, sessionId]);
-  const guide = useLoaded(load);
+  // Ignoring a word reloads the guide; the rest stays on screen meanwhile.
+  const guide = useLoaded(load, true);
   // Exports exactly the words this guide lists.
   const ankiExport = useAnkiExport(anki, { kind: 'session', sessionId });
 
@@ -45,7 +51,7 @@ export function SessionGuideView({
         <div className="guide__toolbar">{ankiExport.button(true)}</div>
         <EmptyState title="No new words">
           {guide.value.lemmasHeard > 0
-            ? 'Every word in this Session was already in your Vocabulary.'
+            ? 'Every word in this Session was already in your Vocabulary, or is ignored.'
             : 'No words were heard in this Session.'}
         </EmptyState>
       </>
@@ -63,7 +69,7 @@ export function SessionGuideView({
             <h2 className="guide__group-title">{group.title}</h2>
             <ul className="guide__words">
               {group.words.map((w) => (
-                <li key={w.lemmaId}>
+                <li key={w.lemmaId} className="guide__item">
                   <button
                     type="button"
                     className="guide__word"
@@ -76,6 +82,16 @@ export function SessionGuideView({
                     <span className="guide__gloss">{w.gloss || <span className="guide__muted">No gloss</span>}</span>
                     <span className="guide__muted">heard {times(w.count)}</span>
                   </button>
+                  {onSetIgnored && (
+                    <button
+                      type="button"
+                      className="btn btn--link guide__ignore"
+                      aria-label={`Ignore ${w.lemma}`}
+                      onClick={() => onSetIgnored(w.lemmaId, w.lemma, true)}
+                    >
+                      Ignore
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>

@@ -4,7 +4,7 @@ import { sessionDuration } from '../format';
 import { Badge } from './Badge';
 import { EmptyState } from './EmptyState';
 import { UtteranceView } from './UtteranceView';
-import { WordPanel, type LoadWordDetails } from './WordPanel';
+import { WordPanel, type LoadWordDetails, type SetIgnored } from './WordPanel';
 import './LiveView.css';
 
 function LevelMeter({ getLevel }: { getLevel: () => number }) {
@@ -75,6 +75,7 @@ export function LiveView({
   onStop,
   onBack,
   loadWordDetails,
+  onSetIgnored,
 }: {
   session: ListedSession;
   now: number;
@@ -88,6 +89,7 @@ export function LiveView({
   onStop: () => void;
   onBack: () => void;
   loadWordDetails: LoadWordDetails;
+  onSetIgnored?: SetIgnored;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
   // Following the live edge; pauses when the learner scrolls up.
@@ -155,7 +157,12 @@ export function LiveView({
           </button>
         )}
         {selectedToken && (
-          <WordPanel token={selectedToken} loadDetails={loadWordDetails} onClose={closePanel} />
+          <WordPanel
+            token={selectedToken}
+            loadDetails={loadWordDetails}
+            onClose={closePanel}
+            onSetIgnored={onSetIgnored}
+          />
         )}
       </div>
     </div>

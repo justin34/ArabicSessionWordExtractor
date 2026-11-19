@@ -66,6 +66,7 @@ interface LemmaRow {
   stem_gloss: string | null;
   first_heard_at: string;
   count: number;
+  ignored_at: string | null;
 }
 
 /** A surface form of a Lemma, with how its chosen reading is said. */
@@ -86,6 +87,8 @@ export interface LemmaRecord {
   stemGloss: string | null;
   firstHeardAt: string;
   count: number;
+  /** When the learner ignored it (GLOSSARY: Ignored Lemma); null when not ignored. */
+  ignoredAt: string | null;
   /** In the order first heard. */
   forms: HeardForm[];
 }
@@ -224,6 +227,8 @@ export class Store {
     this.addColumnIfMissing('sessions', 'mic_track_path', 'TEXT');
     // ... and before Learner Utterances (ADR 0004): everything stored until then is the Desktop Track's.
     this.addColumnIfMissing('utterances', 'track', "TEXT NOT NULL DEFAULT 'desktop'");
+    // ... and before Ignored Lemmas: none was ignored.
+    this.addColumnIfMissing('lemmas', 'ignored_at', 'TEXT');
   }
 
   private addColumnIfMissing(table: string, column: string, type: string): void {
@@ -427,7 +432,30 @@ export class Store {
       firstHeardAt: l.first_heard_at,
       count: l.count,
       heardIn: heardIn.get(l.id) ?? [],
+      ignored: l.ignored_at !== null,
     }));
+  }
+
+  /**
+   * Ignores a Lemma (GLOSSARY: Ignored Lemma) at `at`, or stops ignoring it with null. Its
+   * occurrences, surface forms and Word Card are untouched, so stopping restores it whole.
+   * Ignoring one already ignored keeps when it was first ignored. False for an unknown id.
+   */
+  setIgnored(lemmaId: number, at: string | null): boolean {
+    const result =
+      at === null
+        ? this.db.prepare('UPDATE lemmas SET ignored_at = NULL WHERE id = ?').run(lemmaId)
+        : this.db.prepare('UPDATE lemmas SET ignored_at = coalesce(ignored_at, ?) WHERE id = ?').run(at, lemmaId);
+    return Number(result.changes) > 0;
+  }
+
+  /** The Ignored Lemmas' ids. */
+  ignoredLemmaIds(): Set<number> {
+    return new Set(
+      (this.db.prepare('SELECT id FROM lemmas WHERE ignored_at IS NOT NULL').all() as Array<{ id: number }>).map(
+        (r) => r.id,
+      ),
+    );
   }
 
   /** One Lemma of the Vocabulary, or undefined for an id that is none. */
@@ -455,6 +483,7 @@ export class Store {
       stemGloss: l.stem_gloss,
       firstHeardAt: l.first_heard_at,
       count: l.count,
+      ignoredAt: l.ignored_at ?? null,
       forms: forms.map((f) => ({ ...f })),
     };
   }
@@ -583,7 +612,23 @@ export class Store {
       .run(guide.sessionId, guide.generatedAt, guide.lemmasHeard, JSON.stringify(guide.groups));
   }
 
+  /**
+   * A Session Guide as shown: its stored new words without the Ignored Lemmas, so a guide
+   * generated while one was ignored lists it again once it is not. Groups left empty go.
+   */
   getSessionGuide(sessionId: number): SessionGuide | undefined {
+    const stored = this.getStoredSessionGuide(sessionId);
+    if (!stored) return undefined;
+    const ignored = this.ignoredLemmaIds();
+    if (ignored.size === 0) return stored;
+    const groups = stored.groups
+      .map((g) => ({ ...g, words: g.words.filter((w) => !ignored.has(w.lemmaId)) }))
+      .filter((g) => g.words.length > 0);
+    return { ...stored, groups };
+  }
+
+  /** A Session Guide as generated, Ignored Lemmas included. */
+  getStoredSessionGuide(sessionId: number): SessionGuide | undefined {
     const row = this.db.prepare('SELECT * FROM session_guides WHERE session_id = ?').get(sessionId) as
       | { session_id: number; generated_at: string; lemmas_heard: number; groups: string }
       | undefined;

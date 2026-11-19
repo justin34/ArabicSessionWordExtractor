@@ -16,3 +16,6 @@
   background: var(--color-demo-bg);
   color: var(--color-demo);
 }
+.badge--ignored {
+  color: var(--color-text-muted);
+}

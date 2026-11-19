@@ -75,3 +75,12 @@
 .card__sections {
   max-width: 44rem;
 }
+.guide__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.guide__ignore {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

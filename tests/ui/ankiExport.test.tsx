@@ -17,6 +17,7 @@ const word: VocabularyEntry = {
   firstHeardAt: '2026-01-01T10:00:00.000Z',
   count: 1,
   heardIn: [{ sessionId: 1, utteranceId: 1 }],
+  ignored: false,
 };
 
 function guide(words: SessionGuide['groups'][number]['words']): SessionGuide {

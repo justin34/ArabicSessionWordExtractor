@@ -238,6 +238,10 @@ function registerIpc({ sessions, micTranscriptions, vocabulary, words, guides, a
   ipcMain.handle('sessions:list', () => sessions.list());
   ipcMain.handle('sessions:transcript', (_event, id: unknown) => sessions.transcript(requireSessionId(id)));
   ipcMain.handle('vocabulary:list', () => vocabulary.list());
+  ipcMain.handle('vocabulary:setIgnored', (_event, lemmaId: unknown, ignored: unknown) => {
+    if (typeof ignored !== 'boolean') throw new Error('Expected whether to ignore the word');
+    vocabulary.setIgnored(requireLemmaId(lemmaId), ignored);
+  });
   ipcMain.handle('words:details', async (_event, lemmaId: unknown, surface: unknown) =>
     (await words.details(requireLemmaId(lemmaId), optionalSurface(surface))) ?? null,
   );
