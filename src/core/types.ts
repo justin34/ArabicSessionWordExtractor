@@ -83,6 +83,8 @@ export interface VocabularyEntry {
   count: number;
   /** Each Utterance it was heard in, oldest first; listed once however often it occurs there. */
   heardIn: HeardIn[];
+  /** An Ignored Lemma (GLOSSARY): kept out of Session Guides and Anki exports. */
+  ignored: boolean;
 }
 
 /** An audio input device as the system lists it; the label is kept to name it when unplugged. */
@@ -191,6 +193,8 @@ export interface WordDetails {
   lemmaId: number;
   lemma: string;
   sections: DetailSection[];
+  /** Whether it is an Ignored Lemma (GLOSSARY); set for the word panel, absent on a stored Word Card. */
+  ignored?: boolean;
 }
 
 /**

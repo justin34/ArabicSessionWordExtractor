@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   transcript: (sessionId: number) => ipcRenderer.invoke('sessions:transcript', sessionId),
   listVocabulary: () => ipcRenderer.invoke('vocabulary:list'),
+  setIgnored: (lemmaId: number, ignored: boolean) => ipcRenderer.invoke('vocabulary:setIgnored', lemmaId, ignored),
   wordDetails: (lemmaId: number, surface?: string) => ipcRenderer.invoke('words:details', lemmaId, surface),
   wordCard: (lemmaId: number) => ipcRenderer.invoke('guides:wordCard', lemmaId),
   sessionGuide: (sessionId: number) => ipcRenderer.invoke('guides:sessionGuide', sessionId),

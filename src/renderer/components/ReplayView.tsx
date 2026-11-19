@@ -5,7 +5,7 @@ import { replayPosition, type ReplayPosition } from '../replay';
 import type { Loaded } from '../useLoaded';
 import { EmptyState } from './EmptyState';
 import { UtteranceView } from './UtteranceView';
-import { WordPanel, type LoadWordDetails } from './WordPanel';
+import { WordPanel, type LoadWordDetails, type SetIgnored } from './WordPanel';
 import './LiveView.css';
 import './ReplayView.css';
 
@@ -44,6 +44,7 @@ export function ReplayView({
   micAudioUrl,
   fallbackDurationMs,
   loadWordDetails,
+  onSetIgnored,
 }: {
   transcript: Loaded<Utterance[]>;
   shows: ReplayShows;
@@ -53,6 +54,7 @@ export function ReplayView({
   /** Length shown until the audio reports its own (a recording may not carry one). */
   fallbackDurationMs: number;
   loadWordDetails: LoadWordDetails;
+  onSetIgnored?: SetIgnored;
 }) {
   const all = transcript.state === 'loaded' ? transcript.value : [];
   const teacher = all.filter((u) => u.track !== 'mic');
@@ -258,6 +260,7 @@ export function ReplayView({
             token={selectedToken}
             loadDetails={loadWordDetails}
             onClose={closePanel}
+            onSetIgnored={onSetIgnored}
             unanalyzedNote="This word was not analyzed, so it has no details."
           />
         )}

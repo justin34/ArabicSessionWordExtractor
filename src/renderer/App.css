@@ -23,3 +23,16 @@
   background: var(--color-success-bg);
   color: var(--color-success);
 }
+.notice--info {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+.notice__lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.notice__note {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

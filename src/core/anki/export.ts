@@ -29,10 +29,16 @@ export class AnkiExporter {
 
   /**
    * The Lemmas an export holds, in the order heard: every Lemma of the Vocabulary, or a
-   * Session's new Lemmas, exactly as its Session Guide lists them.
+   * Session's new Lemmas, exactly as its Session Guide lists them. Ignored Lemmas never are.
    */
   lemmaIds(target: AnkiExportTarget): number[] {
-    if (target.kind === 'vocabulary') return this.store.listVocabulary().map((e) => e.lemmaId).reverse();
+    if (target.kind === 'vocabulary') {
+      return this.store
+        .listVocabulary()
+        .filter((e) => !e.ignored)
+        .map((e) => e.lemmaId)
+        .reverse();
+    }
     const guide = this.store.getSessionGuide(target.sessionId);
     return guide?.groups.flatMap((g) => g.words.map((w) => w.lemmaId)) ?? [];
   }
@@ -60,9 +66,7 @@ export class AnkiExporter {
   async export(target: AnkiExportTarget, path: string): Promise<number> {
     if (target.kind === 'session') this.store.getSession(target.sessionId);
     const notes = await this.notes(target);
-    if (notes.length === 0) {
-      throw new Error(target.kind === 'vocabulary' ? 'Your Vocabulary has no words yet.' : 'This Session has no new words.');
-    }
+    if (notes.length === 0) throw new Error(this.nothingToExport(target));
     const bytes = ankiPackage(notes, this.media(), this.now());
     const partial = `${path}.${process.pid}-${this.now()}.part`;
     try {
@@ -73,6 +77,13 @@ export class AnkiExporter {
       throw new Error(`The deck could not be saved: ${(err as Error).message}`);
     }
     return notes.length;
+  }
+
+  private nothingToExport(target: AnkiExportTarget): string {
+    if (target.kind === 'session') return 'This Session has no new words.';
+    return this.store.listVocabulary().length === 0
+      ? 'Your Vocabulary has no words yet.'
+      : 'Every word in your Vocabulary is ignored.';
   }
 
   private media(): AnkiMedia[] {

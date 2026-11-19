@@ -106,6 +106,12 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
   const [activeId, setActiveId] = useState<number | null>(null);
   const [vocabulary, setVocabulary] = useState<VocabularyEntry[] | null>(null);
   const [vocabularyQuery, setVocabularyQuery] = useState('');
+  /** The Vocabulary's Ignored filter. */
+  const [ignoredOnly, setIgnoredOnly] = useState(false);
+  /** Bumped when a Lemma is ignored or stops being so: the Vocabulary, guides and word panel reload. */
+  const [ignoreVersion, setIgnoreVersion] = useState(0);
+  /** The word just ignored, for its "Undo" notice. */
+  const [justIgnored, setJustIgnored] = useState<{ lemmaId: number; lemma: string } | null>(null);
   /** What a packaged build is missing (GLOSSARY: Installer); told until it is reinstalled. */
   const [bundleProblems, setBundleProblems] = useState<BundleProblem[]>([]);
   const [readyUpdate, setReadyUpdate] = useState<ReadyUpdate | null>(null);
@@ -284,7 +290,26 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
     return () => {
       current = false;
     };
-  }, [bridge, onVocabulary]);
+  }, [bridge, onVocabulary, ignoreVersion]);
+
+  /**
+   * Ignores a Lemma (GLOSSARY: Ignored Lemma), or stops ignoring it, from the Vocabulary,
+   * the word panel or a Session Guide. Ignoring shows an "Undo" notice; no dialog.
+   */
+  const setIgnored = useCallback(
+    (lemmaId: number, lemma: string, ignored: boolean) => {
+      bridge
+        .setIgnored(lemmaId, ignored)
+        .then(() => {
+          setIgnoreVersion((v) => v + 1);
+          setJustIgnored((shown) => (ignored ? { lemmaId, lemma } : shown?.lemmaId === lemmaId ? null : shown));
+        })
+        .catch((err: Error) =>
+          setNotice(`Could not ${ignored ? 'ignore' : 'stop ignoring'} ${lemma}: ${err.message}`),
+        );
+    },
+    [bridge],
+  );
 
   // Stop any demo feeds if the app unmounts.
   useEffect(() => {
@@ -484,11 +509,15 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
     () => (audioCapture ? audioCapture.level() : 0),
     [audioCapture],
   );
+  // Each changes with ignoreVersion, so what they show is loaded again once a word is ignored.
   const loadWordDetails = useCallback(
     (lemmaId: number, surface: string) => bridge.wordDetails(lemmaId, surface),
-    [bridge],
+    [bridge, ignoreVersion],
   );
-  const loadSessionGuide = useCallback((sessionId: number) => bridge.sessionGuide(sessionId), [bridge]);
+  const loadSessionGuide = useCallback(
+    (sessionId: number) => bridge.sessionGuide(sessionId),
+    [bridge, ignoreVersion],
+  );
   const loadTranscript = useCallback((sessionId: number) => bridge.transcript(sessionId), [bridge]);
   const loadWordCard = useCallback((lemmaId: number) => bridge.wordCard(lemmaId), [bridge]);
   const loadAudioSettings = useCallback(() => bridge.audioSettings(), [bridge]);
@@ -525,6 +554,33 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
             </button>
           </div>
         )}
+        {justIgnored && (
+          <div className="notice notice--info" role="status" aria-label="Ignored word">
+            <div className="notice__lines">
+              <span>
+                Ignored{' '}
+                <span lang="ar" dir="rtl">
+                  {justIgnored.lemma}
+                </span>
+                {' · '}
+                <button
+                  type="button"
+                  className="btn btn--link"
+                  onClick={() => setIgnored(justIgnored.lemmaId, justIgnored.lemma, false)}
+                >
+                  Undo
+                </button>
+              </span>
+              <span className="notice__note">
+                It stays out of your Session Guides and Anki exports. If you already imported it into Anki, suspend
+                or delete its note there.
+              </span>
+            </div>
+            <button type="button" className="btn btn--link" onClick={() => setJustIgnored(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
         {notice && (
           <div className="notice" role="alert">
             <span>{notice}</span>
@@ -554,6 +610,7 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
             onStop={() => void stopSession(liveSession)}
             onBack={goSessions}
             loadWordDetails={loadWordDetails}
+            onSetIgnored={liveSession.isDemo ? undefined : setIgnored}
           />
         )}
         {route.name === 'replay' &&
@@ -575,6 +632,7 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
               loadWordDetails={loadWordDetails}
               loadGuide={loadSessionGuide}
               onOpenWord={openWordCard}
+              onSetIgnored={setIgnored}
               onBack={goSessions}
               anki={anki}
             />
@@ -592,7 +650,10 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
             entries={vocabulary}
             query={vocabularyQuery}
             onQueryChange={setVocabularyQuery}
+            ignoredOnly={ignoredOnly}
+            onIgnoredOnlyChange={setIgnoredOnly}
             onOpenWord={openWordCard}
+            onSetIgnored={setIgnored}
             anki={anki}
           />
         )}

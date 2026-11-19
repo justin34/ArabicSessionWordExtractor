@@ -15,11 +15,16 @@ import type { AnkiExportTarget, SessionGuide, VocabularyEntry, WordCard, WordDet
 /** The Vocabulary, built by the Session pipeline as Utterances are analyzed. */
 export interface Vocabulary {
   list(): VocabularyEntry[];
+  /**
+   * Ignores a Lemma (GLOSSARY: Ignored Lemma), or stops ignoring it: it stays heard and
+   * shown, but leaves (or rejoins) Session Guides and Anki exports. Throws for an unknown id.
+   */
+  setIgnored(lemmaId: number, ignored: boolean): void;
 }
 
 /** The click-a-word panel's content. */
 export interface Words {
-  /** The Detail Module sections for a Lemma; `surface` is the form clicked. */
+  /** The Detail Module sections for a Lemma, and whether it is ignored; `surface` is the form clicked. */
   details(lemmaId: number, surface?: string): Promise<WordDetails | undefined>;
 }
 
@@ -97,8 +102,20 @@ export function createApp({
   const micTranscriptions = new MicTranscriptions(store, providers, recordingsDir);
   // Sessions a crash ended, and data from before study guides, get theirs now.
   studyGuides.catchUp();
-  const vocabulary: Vocabulary = { list: () => store.listVocabulary() };
-  const words: Words = { details: (lemmaId, surface) => builder.details(lemmaId, surface) };
+  const vocabulary: Vocabulary = {
+    list: () => store.listVocabulary(),
+    setIgnored: (lemmaId, ignored) => {
+      if (!store.setIgnored(lemmaId, ignored ? new Date().toISOString() : null)) {
+        throw new Error(`Lemma ${lemmaId} is not in the Vocabulary`);
+      }
+    },
+  };
+  const words: Words = {
+    details: async (lemmaId, surface) => {
+      const details = await builder.details(lemmaId, surface);
+      return details && { ...details, ignored: store.getLemma(lemmaId)?.ignoredAt != null };
+    },
+  };
   const guides: Guides = {
     wordCard: (lemmaId) => studyGuides.wordCard(lemmaId),
     sessionGuide: (sessionId) => studyGuides.sessionGuide(sessionId),

@@ -12,6 +12,7 @@ const kitab: VocabularyEntry = {
   firstHeardAt: '2026-01-01T10:00:00.000Z',
   count: 2,
   heardIn: [],
+  ignored: false,
 };
 
 describe('Vocabulary search', () => {
