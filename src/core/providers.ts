@@ -30,14 +30,23 @@ export interface RecordedAudio {
   path: string;
   /** Its media type, e.g. 'audio/webm' or 'audio/wav'. */
   contentType: string;
+  /**
+   * Set for a recording being imported (GLOSSARY: Imported Session): its length, or null
+   * when it is not known. Deepgram, which gives up on long recordings, is then used only
+   * for one known to be under 10 minutes, and also as the fallback when Soniox fails.
+   */
+  importedDurationMs?: number | null;
 }
+
+/** Where a recording's transcription is: its file being sent, or the service working on it. */
+export type RecordedPhase = 'uploading' | 'transcribing';
 
 /**
  * Speech-to-text for a whole recording, after the fact: the file in, every recognized
- * word out, timed from the start of the file.
+ * word out, timed from the start of the file. `onPhase` is told as it moves on.
  */
 export interface RecordedSpeechToText {
-  transcribeFile(audio: RecordedAudio): Promise<SttWord[]>;
+  transcribeFile(audio: RecordedAudio, onPhase?: (phase: RecordedPhase) => void): Promise<SttWord[]>;
 }
 
 /** Sentence translation: Arabic sentence in, English sentence out. */
@@ -111,7 +120,7 @@ export interface Dictionary {
 
 export interface Providers {
   speechToText: SpeechToText;
-  /** Transcribes a completed Session's Mic Track afterwards; without one, that fails saying so. */
+  /** Transcribes a completed Session's Mic Track, or an imported recording; without one, that fails saying so. */
   recordedSpeechToText?: RecordedSpeechToText;
   translator: Translator;
   arabicAnalyzer: ArabicAnalyzer;

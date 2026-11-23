@@ -1,0 +1,10 @@
+.trash-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex: none;
+  vertical-align: -0.125em;
+  background-color: currentColor;
+  -webkit-mask: url('../icons/trash-can.png') center / contain no-repeat;
+  mask: url('../icons/trash-can.png') center / contain no-repeat;
+}

@@ -9,6 +9,9 @@ const CONTENT_TYPES: Record<string, string> = {
   '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg',
   '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  // An imported video plays for its audio.
+  '.mp4': 'audio/mp4',
 };
 
 /** The byte range a `Range: bytes=…` header asks for, or 'unsatisfiable'; null means the whole file. */

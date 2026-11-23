@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { MicTranscriptionListener, ReadyUpdate, TranscriptionFailureListener, TranscriptListener } from '../core/types';
+import type {
+  ImportListener,
+  MicTranscriptionListener,
+  ReadyUpdate,
+  TranscriptionFailureListener,
+  TranscriptListener,
+} from '../core/types';
 
 contextBridge.exposeInMainWorld('api', {
   startSession: (options?: { mic: boolean; transcribeMic?: boolean; gateMic?: boolean }) => ipcRenderer.invoke('sessions:start', options),
@@ -22,6 +28,20 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('micTranscription:status', handler);
     return () => void ipcRenderer.removeListener('micTranscription:status', handler);
   },
+  pickRecording: () => ipcRenderer.invoke('imports:pick'),
+  importRecording: (token: string, name: string | null, durationMs: number | null) =>
+    ipcRenderer.invoke('imports:start', token, name, durationMs),
+  importStatus: (sessionId: number) => ipcRenderer.invoke('imports:status', sessionId),
+  cancelImport: (sessionId: number) => ipcRenderer.invoke('imports:cancel', sessionId),
+  /** How the import running is going; returns an unsubscribe. */
+  subscribeImports: (listener: ImportListener) => {
+    const handler = (_event: IpcRendererEvent, ...[id, status]: Parameters<ImportListener>) => listener(id, status);
+    ipcRenderer.on('imports:status', handler);
+    return () => void ipcRenderer.removeListener('imports:status', handler);
+  },
+  renameSession: (sessionId: number, name: string | null) => ipcRenderer.invoke('sessions:rename', sessionId, name),
+  removalPreview: (sessionId: number) => ipcRenderer.invoke('sessions:removalPreview', sessionId),
+  removeSession: (sessionId: number, keepWords: boolean) => ipcRenderer.invoke('sessions:remove', sessionId, keepWords),
   stopSession: (sessionId: number) => ipcRenderer.invoke('sessions:stop', sessionId),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   transcript: (sessionId: number) => ipcRenderer.invoke('sessions:transcript', sessionId),

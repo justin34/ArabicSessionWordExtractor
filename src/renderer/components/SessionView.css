@@ -99,3 +99,24 @@
 .session-view__panel[hidden] {
   display: none;
 }
+.session-view__titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.session-view__date {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+/* Remove sits at the end; the mic and layout controls before it keep it there. */
+.session-view__remove {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline-start: auto;
+  align-self: center;
+}
+.session-view__transcribe-mic + .session-view__remove,
+.session-view__layout + .session-view__remove {
+  margin-inline-start: 0;
+}

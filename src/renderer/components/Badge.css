@@ -19,3 +19,11 @@
 .badge--ignored {
   color: var(--color-text-muted);
 }
+.badge--importing {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+.badge--imported {
+  background: var(--color-learner-bg);
+  color: var(--color-learner);
+}

@@ -7,6 +7,8 @@ import { WordDetailsBuilder, type DetailModuleConfig } from './details/wordDetai
 import { StudyGuides } from './guides/studyGuides';
 import type { Providers } from './providers';
 import { MicTranscriptions } from './micTranscription';
+import { RecordingImports } from './recordingImport';
+import { SessionLibrary, sweepAudioFiles } from './sessionLibrary';
 import { Sessions } from './sessions';
 import { Settings, type SecretCodec } from './settings';
 import { Store } from './store';
@@ -48,6 +50,10 @@ export interface App {
   sessions: Sessions;
   /** "Transcribe my microphone" for completed Sessions, in the background. */
   micTranscriptions: MicTranscriptions;
+  /** Import a recording as a new Session, in the background (GLOSSARY: Imported Session). */
+  imports: RecordingImports;
+  /** Naming and removing completed Sessions. */
+  library: SessionLibrary;
   vocabulary: Vocabulary;
   words: Words;
   guides: Guides;
@@ -100,6 +106,11 @@ export function createApp({
     translationWaitMs,
   });
   const micTranscriptions = new MicTranscriptions(store, providers, recordingsDir);
+  // An import the app quit during is abandoned first, then any audio no Session points to
+  // (one Windows kept locked when its Session was removed) is deleted.
+  const imports = new RecordingImports(store, sessions, providers, recordingsDir);
+  sweepAudioFiles(recordingsDir, store.audioPaths());
+  const library = new SessionLibrary(store, micTranscriptions, studyGuides);
   // Sessions a crash ended, and data from before study guides, get theirs now.
   studyGuides.catchUp();
   const vocabulary: Vocabulary = {
@@ -130,5 +141,5 @@ export function createApp({
     studyGuides.stop();
     store.close();
   };
-  return { sessions, micTranscriptions, vocabulary, words, guides, anki, settings, apiKeys, close };
+  return { sessions, micTranscriptions, imports, library, vocabulary, words, guides, anki, settings, apiKeys, close };
 }

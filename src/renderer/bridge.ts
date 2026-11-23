@@ -7,9 +7,12 @@ import type {
   AudioDevice,
   AudioSettings,
   BundleProblem,
+  ImportStatus,
   LiveUtterance,
   MicTranscriptionStatus,
+  PickedRecording,
   ReadyUpdate,
+  RemovalPreview,
   ReplayLayout,
   Session,
   SessionGuide,
@@ -20,7 +23,7 @@ import type {
   WordDetails,
 } from '../core/types';
 
-export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, BundleProblem, LiveUtterance, MicTranscriptionStatus, ReadyUpdate, ReplayLayout, SessionGuide, Track, Utterance, VocabularyEntry, WordCard, WordDetails };
+export type { AnkiExportResult, AnkiExportTarget, ApiKeyCheck, ApiKeyName, ApiKeyStatus, AudioDevice, AudioSettings, BundleProblem, ImportStatus, LiveUtterance, MicTranscriptionStatus, PickedRecording, ReadyUpdate, RemovalPreview, ReplayLayout, SessionGuide, Track, Utterance, VocabularyEntry, WordCard, WordDetails };
 
 export type Unsubscribe = () => void;
 
@@ -48,6 +51,30 @@ export interface Bridge {
   /** Sends mic audio gated by the mic threshold to speech-to-text; never recorded. */
   appendGatedMicAudio(sessionId: number, chunk: Uint8Array): Promise<void>;
   stopSession(sessionId: number): Promise<Session>;
+  /**
+   * Shows the Open dialog for a recording to import; null when the learner cancels. Rejects,
+   * naming the formats accepted, for a file that cannot be imported.
+   */
+  pickRecording(): Promise<PickedRecording | null>;
+  /** Where the renderer can load a picked recording from, to tell how long it is. */
+  pickedRecordingUrl(token: string): string;
+  /**
+   * Imports a picked recording as a new Session, in the main process, in the background;
+   * returns the Session, marked importing. `durationMs` is its length, null when unknown.
+   */
+  importRecording(token: string, name: string | null, durationMs: number | null): Promise<Session>;
+  /** Where a Session's import stands; null when it is not being imported. */
+  importStatus(sessionId: number): Promise<ImportStatus | null>;
+  /** Abandons a Session's import: it leaves no Session and no copied file. */
+  cancelImport(sessionId: number): Promise<void>;
+  /** Told how the import running is going. */
+  subscribeImports(onStatus: (sessionId: number, status: ImportStatus) => void): Unsubscribe;
+  /** Names a completed Session; an empty name or null unnames it. */
+  renameSession(sessionId: number, name: string | null): Promise<Session>;
+  /** The words that would leave the Vocabulary if the Session were removed without keeping them. */
+  removalPreview(sessionId: number): Promise<RemovalPreview>;
+  /** Removes a completed Session; with `keepWords`, the Vocabulary is unchanged (ADR 0005). */
+  removeSession(sessionId: number, keepWords: boolean): Promise<void>;
   /** Where "Transcribe my microphone" stands for a completed Session: running, or why it failed; null otherwise. */
   micTranscription(sessionId: number): Promise<MicTranscriptionStatus | null>;
   /** Starts a new copy of the Mic Track gated by the mic threshold (WAV), sent in chunks before `transcribeMicTrack`. */
@@ -169,6 +196,11 @@ export interface MicAudioCapture {
  */
 export interface MicRecordingGate {
   gate(url: string, threshold: number): Promise<Uint8Array[]>;
+}
+
+/** Tells how long a recording is, in ms, before it is imported; null when it cannot. */
+export interface RecordingProbe {
+  durationMs(url: string): Promise<number | null>;
 }
 
 /** The system's audio input devices (microphones, Stereo Mix, virtual cables). */

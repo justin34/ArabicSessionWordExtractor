@@ -1,4 +1,12 @@
-import type { RecordedAudio, RecordedSpeechToText, SpeechToText, SttEvent, SttWord, Translator } from './providers';
+import type {
+  RecordedAudio,
+  RecordedPhase,
+  RecordedSpeechToText,
+  SpeechToText,
+  SttEvent,
+  SttWord,
+  Translator,
+} from './providers';
 import { API_KEY_NAMES, type Settings } from './settings';
 import { DeepgramSpeechToText } from './stt/deepgram';
 import { DeepgramRecordedSpeechToText, SonioxRecordedSpeechToText } from './stt/recorded';
@@ -31,6 +39,10 @@ export const NO_TRANSCRIPTION_KEY =
   'No speech-to-text key: audio is recorded without a Transcript. Add a Soniox or Deepgram key in Settings.';
 export const NO_RECORDING_TRANSCRIPTION_KEY =
   'No speech-to-text key: add a Soniox or Deepgram key in Settings, then try again.';
+export const LONG_RECORDING_NEEDS_SONIOX =
+  'Deepgram cannot transcribe a recording over 10 minutes (or one whose length is unknown): add a Soniox key in Settings.';
+/** Deepgram gives up on a recording that takes longer than this to process. */
+export const DEEPGRAM_RECORDING_LIMIT_MS = 10 * 60 * 1000;
 export const NO_TRANSLATION_KEY =
   'No Google Cloud Translation key: sentences are not translated. Add one in Settings.';
 
@@ -192,6 +204,8 @@ export class KeyedSpeechToText implements SpeechToText {
 /**
  * Speech-to-text for a recording, with the key in use when it starts: Soniox's async API
  * first, Deepgram's pre-recorded API as the fallback. Without either, it fails at once.
+ * An imported recording (`importedDurationMs` set) goes to Deepgram only when it is known
+ * to be under 10 minutes: without a Soniox key, or once Soniox has failed on it.
  */
 export class KeyedRecordedSpeechToText implements RecordedSpeechToText {
   constructor(
@@ -202,11 +216,29 @@ export class KeyedRecordedSpeechToText implements RecordedSpeechToText {
     },
   ) {}
 
-  async transcribeFile(audio: RecordedAudio): Promise<SttWord[]> {
+  async transcribeFile(audio: RecordedAudio, onPhase?: (phase: RecordedPhase) => void): Promise<SttWord[]> {
     const soniox = this.keys.get('soniox');
-    if (soniox) return this.make.soniox(soniox).transcribeFile(audio);
     const deepgram = this.keys.get('deepgram');
-    if (deepgram) return this.make.deepgram(deepgram).transcribeFile(audio);
+    if (audio.importedDurationMs === undefined) {
+      if (soniox) return this.make.soniox(soniox).transcribeFile(audio, onPhase);
+      if (deepgram) return this.make.deepgram(deepgram).transcribeFile(audio, onPhase);
+      throw new MissingKeyError(NO_RECORDING_TRANSCRIPTION_KEY);
+    }
+    const length = audio.importedDurationMs;
+    const deepgramCan = length !== null && length < DEEPGRAM_RECORDING_LIMIT_MS;
+    if (soniox) {
+      try {
+        return await this.make.soniox(soniox).transcribeFile(audio, onPhase);
+      } catch (err) {
+        if (!deepgram || !deepgramCan) throw err;
+        console.warn('Soniox could not transcribe the recording; trying Deepgram:', err);
+        return this.make.deepgram(deepgram).transcribeFile(audio, onPhase);
+      }
+    }
+    if (deepgram) {
+      if (!deepgramCan) throw new Error(LONG_RECORDING_NEEDS_SONIOX);
+      return this.make.deepgram(deepgram).transcribeFile(audio, onPhase);
+    }
     throw new MissingKeyError(NO_RECORDING_TRANSCRIPTION_KEY);
   }
 }

@@ -57,6 +57,15 @@ function lemmaPronunciation(lemma: LemmaRecord): string {
 /** A tag Anki keeps whole: no spaces. */
 const tagPart = (text: string) => text.trim().replace(/\s+/g, '_');
 
+/**
+ * The tag of the Session a Lemma was first heard in: `session::<date>`, or
+ * `session::<date>::<name>` for a named one, without any `::` of the name's own.
+ */
+export function sessionTag(startedAt: string, name: string | null): string {
+  const named = name ? tagPart(name.replace(/::/g, '')) : '';
+  return named ? `session::${localDate(startedAt)}::${named}` : `session::${localDate(startedAt)}`;
+}
+
 async function settle<T>(work: () => Promise<T>, what: string, lemma: string): Promise<T | undefined> {
   try {
     return await work();
@@ -109,13 +118,16 @@ export async function ankiNote(store: Store, dictionary: Dictionary, lemmaId: nu
   if (pos) tags.push(`pos::${tagPart(readablePartOfSpeech(pos))}`);
   const sessions = store.lemmaSessions(lemma.id);
   const first = sessions[sessions.length - 1];
-  if (first) tags.push(`session::${localDate(first.startedAt)}`);
+  if (first) tags.push(sessionTag(first.startedAt, first.name));
 
+  // Renaming the first-heard Session retags the note, so it counts as a change to it.
   const card = store.getWordCard(lemma.id);
+  const changed = new Date(card?.updatedAt ?? lemma.firstHeardAt).getTime();
+  const renamed = first?.renamedAt ? new Date(first.renamedAt).getTime() : 0;
   return {
     key: lemma.lemma,
     fields,
     tags,
-    modifiedMs: new Date(card?.updatedAt ?? lemma.firstHeardAt).getTime(),
+    modifiedMs: Math.max(changed, renamed),
   };
 }

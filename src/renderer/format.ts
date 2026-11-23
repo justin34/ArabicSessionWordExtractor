@@ -19,3 +19,8 @@ export function sessionDuration(
   const end = s.endedAt ? new Date(s.endedAt).getTime() : now;
   return formatDuration(end - new Date(s.startedAt).getTime());
 }
+
+/** A Session's start in short, e.g. "22 Nov, 14:05", for the remove dialog. */
+export function formatShortStart(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
