@@ -1,5 +1,5 @@
 import { openAsBlob } from 'node:fs';
-import type { RecordedAudio, RecordedSpeechToText, SttEvent, SttWord } from '../providers';
+import type { RecordedAudio, RecordedPhase, RecordedSpeechToText, SttEvent, SttWord } from '../providers';
 import { utteranceEvent } from './socket';
 import { toWords } from './soniox';
 
@@ -88,10 +88,12 @@ export class SonioxRecordedSpeechToText implements RecordedSpeechToText {
     this.pollMs = pollMs;
   }
 
-  async transcribeFile(audio: RecordedAudio): Promise<SttWord[]> {
+  async transcribeFile(audio: RecordedAudio, onPhase?: (phase: RecordedPhase) => void): Promise<SttWord[]> {
+    onPhase?.('uploading');
     const form = new FormData();
     form.append('file', await openAsBlob(audio.path, { type: audio.contentType }), fileName(audio));
     const file = await this.call<{ id: string }>('POST', '/files', form);
+    onPhase?.('transcribing');
     let transcriptionId: string | undefined;
     try {
       const created = await this.call<SonioxTranscription>(
@@ -157,7 +159,8 @@ export class DeepgramRecordedSpeechToText implements RecordedSpeechToText {
     this.fetch = fetchImpl;
   }
 
-  async transcribeFile(audio: RecordedAudio): Promise<SttWord[]> {
+  async transcribeFile(audio: RecordedAudio, onPhase?: (phase: RecordedPhase) => void): Promise<SttWord[]> {
+    onPhase?.('uploading');
     const params = new URLSearchParams({ model: 'nova-3', language: 'ar', punctuate: 'true' });
     let response: Response;
     try {

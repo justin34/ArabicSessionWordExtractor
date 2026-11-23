@@ -4,7 +4,10 @@ import { formatStart, sessionDuration } from '../format';
 import { useLoaded } from '../useLoaded';
 import { ReplayView, type ReplayShows } from './ReplayView';
 import type { AnkiActions } from './AnkiExport';
+import { Badge } from './Badge';
 import { SessionGuideView } from './SessionGuideView';
+import { SessionName } from './SessionName';
+import { TrashIcon } from './TrashIcon';
 import type { LoadWordDetails, SetIgnored } from './WordPanel';
 import './SessionView.css';
 
@@ -39,6 +42,8 @@ export function SessionView({
   onSetIgnored,
   onBack,
   anki,
+  onRename,
+  onRemove,
 }: {
   session: ListedSession;
   tab: SessionTab;
@@ -63,6 +68,10 @@ export function SessionView({
   onSetIgnored?: SetIgnored;
   onBack: () => void;
   anki: AnkiActions;
+  /** Names the Session, or with null unnames it. */
+  onRename?: (name: string | null) => void;
+  /** Opens the remove dialog; absent while it cannot be removed (mic transcription running). */
+  onRemove?: () => void;
 }) {
   // A new transcriptVersion means the stored Transcript changed: load it again.
   const load = useCallback(() => loadTranscript(session.id), [loadTranscript, session.id, transcriptVersion]);
@@ -96,8 +105,14 @@ export function SessionView({
         ← Back to Sessions
       </button>
       <header className="session-view__header">
-        <h1>{formatStart(session.startedAt)}</h1>
+        <div className="session-view__titles">
+          <h1>
+            <SessionName name={session.name} date={formatStart(session.startedAt)} onRename={onRename} />
+          </h1>
+          {session.name !== null && <span className="session-view__date">{formatStart(session.startedAt)}</span>}
+        </div>
         <span className="session-view__length">{sessionDuration(session, Date.now())}</span>
+        {session.imported && <Badge kind="imported">Imported</Badge>}
         {offerMicTranscription && (
           <button type="button" className="btn session-view__transcribe-mic" onClick={onTranscribeMic}>
             Transcribe my microphone
@@ -118,6 +133,11 @@ export function SessionView({
               </button>
             ))}
           </div>
+        )}
+        {onRemove && (
+          <button type="button" className="btn session-view__remove" onClick={onRemove}>
+            <TrashIcon /> Remove
+          </button>
         )}
       </header>
       {micTranscription?.state === 'running' && (

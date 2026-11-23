@@ -20,6 +20,8 @@ interface SessionRow {
   status: SessionStatus;
   desktop_track_path: string;
   mic_track_path: string | null;
+  name: string | null;
+  imported: number;
 }
 
 interface UtteranceRow {
@@ -39,6 +41,8 @@ const toSession = (r: SessionRow): Session => ({
   status: r.status,
   desktopTrackPath: r.desktop_track_path,
   micTrackPath: r.mic_track_path ?? null,
+  name: r.name ?? null,
+  imported: r.imported === 1,
 });
 
 interface TokenRow {
@@ -67,6 +71,7 @@ interface LemmaRow {
   first_heard_at: string;
   count: number;
   ignored_at: string | null;
+  first_removed?: number | null;
 }
 
 /** A surface form of a Lemma, with how its chosen reading is said. */
@@ -98,15 +103,49 @@ export interface HeardUtterance {
   utteranceId: number;
   sessionId: number;
   sessionStartedAt: string;
+  sessionName: string | null;
   text: string;
   translation: string;
 }
 
-/** A Session a Lemma was heard in, and how often. */
+/** A Session a Lemma was heard in, and how often; a Removed Session too. */
 export interface HeardSession {
   sessionId: number;
   startedAt: string;
+  name: string | null;
+  /** When it was last renamed; null when never. */
+  renamedAt: string | null;
+  removed: boolean;
   count: number;
+}
+
+/** The audio files a Session points to. */
+export interface SessionAudio {
+  desktopTrackPath: string;
+  micTrackPath: string | null;
+}
+
+/** What removing a Session left: the audio files to delete, and the Lemmas it fed still in the Vocabulary. */
+export interface RemovedSession {
+  audio: SessionAudio;
+  lemmaIds: number[];
+}
+
+/** How a new Session is created: recording by default, or as an Imported Session being imported. */
+export interface NewSessionOptions {
+  status?: 'recording' | 'importing';
+  name?: string | null;
+  imported?: boolean;
+}
+
+/** A Lemma heard in one Session and no other. */
+export interface OnlyHeardIn {
+  lemmaId: number;
+  lemma: string;
+  /** The first quick gloss one of its Tokens got there, if any. */
+  gloss: string | null;
+  stemGloss: string | null;
+  ignored: boolean;
 }
 
 /** A Lemma first heard in a given Session, for its Session Guide. */
@@ -129,6 +168,14 @@ export interface HeardWord {
   /** Position of the Token it belongs to, or null when it matched none. */
   tokenPosition: number | null;
 }
+
+/**
+ * SQL true when Occurrence `o` was not heard on the Mic Track: one of a Removed Session has
+ * no Utterance and counts. None ever is a Learner Utterance's (ADR 0004); were one stored,
+ * no reader would count it.
+ */
+const heard = (o: string) =>
+  `NOT EXISTS (SELECT 1 FROM utterances mu WHERE mu.id = ${o}.utterance_id AND mu.track = 'mic')`;
 
 const toUtterance = (r: UtteranceRow, tokens: Token[]): Utterance => ({
   id: r.id,
@@ -187,15 +234,17 @@ export class Store {
         seq INTEGER NOT NULL,
         PRIMARY KEY (lemma_id, surface)
       );
-      -- Each time a Lemma was heard: append-only, so the count is the number of rows.
+      -- Each time a Lemma was heard, so the count is the number of rows. A Removed Session's
+      -- keep their Session and lose their Utterance (ADR 0005).
       CREATE TABLE IF NOT EXISTS occurrences (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         lemma_id INTEGER NOT NULL REFERENCES lemmas(id),
-        utterance_id INTEGER NOT NULL REFERENCES utterances(id),
+        session_id INTEGER NOT NULL REFERENCES sessions(id),
+        utterance_id INTEGER REFERENCES utterances(id),
         position INTEGER NOT NULL,
-        surface TEXT NOT NULL
+        surface TEXT NOT NULL,
+        heard_at TEXT NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS occurrences_by_lemma ON occurrences (lemma_id, utterance_id);
       -- Study guides, stored as generated: a Word Card per Lemma, a Session Guide per Session.
       CREATE TABLE IF NOT EXISTS word_cards (
         lemma_id INTEGER PRIMARY KEY REFERENCES lemmas(id),
@@ -229,6 +278,49 @@ export class Store {
     this.addColumnIfMissing('utterances', 'track', "TEXT NOT NULL DEFAULT 'desktop'");
     // ... and before Ignored Lemmas: none was ignored.
     this.addColumnIfMissing('lemmas', 'ignored_at', 'TEXT');
+    // ... and before Session names and Imported Sessions (#57).
+    this.addColumnIfMissing('sessions', 'name', 'TEXT');
+    this.addColumnIfMissing('sessions', 'renamed_at', 'TEXT');
+    this.addColumnIfMissing('sessions', 'imported', 'INTEGER NOT NULL DEFAULT 0');
+    this.migrateOccurrences();
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS occurrences_by_lemma ON occurrences (lemma_id, utterance_id);
+      CREATE INDEX IF NOT EXISTS occurrences_by_session ON occurrences (session_id);
+    `);
+  }
+
+  /**
+   * Before Removed Sessions (ADR 0005), an Occurrence had to have an Utterance and knew
+   * neither its Session nor when it was heard. The table is rebuilt with both; when it was
+   * heard is taken as its Session's start plus the Utterance's offset.
+   */
+  private migrateOccurrences(): void {
+    const columns = this.db.prepare('PRAGMA table_info(occurrences)').all() as Array<{ name: string }>;
+    if (columns.some((c) => c.name === 'session_id')) return;
+    this.db.exec('BEGIN');
+    try {
+      this.db.exec(`
+        CREATE TABLE occurrences_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lemma_id INTEGER NOT NULL REFERENCES lemmas(id),
+          session_id INTEGER NOT NULL REFERENCES sessions(id),
+          utterance_id INTEGER REFERENCES utterances(id),
+          position INTEGER NOT NULL,
+          surface TEXT NOT NULL,
+          heard_at TEXT NOT NULL
+        );
+        INSERT INTO occurrences_new (id, lemma_id, session_id, utterance_id, position, surface, heard_at)
+          SELECT o.id, o.lemma_id, u.session_id, o.utterance_id, o.position, o.surface,
+                 strftime('%Y-%m-%dT%H:%M:%fZ', s.started_at, '+' || (u.start_ms / 1000.0) || ' seconds')
+          FROM occurrences o JOIN utterances u ON u.id = o.utterance_id JOIN sessions s ON s.id = u.session_id;
+        DROP TABLE occurrences;
+        ALTER TABLE occurrences_new RENAME TO occurrences;
+      `);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   private addColumnIfMissing(table: string, column: string, type: string): void {
@@ -237,22 +329,24 @@ export class Store {
   }
 
   /**
-   * Creates a recording Session; desktopTrackPathFor derives its Desktop Track path from the
-   * new id, and micTrackPathFor, when given, its Mic Track path.
+   * Creates a recording Session, or with `status: 'importing'` an Imported Session being
+   * imported; desktopTrackPathFor derives its Desktop Track path from the new id, and
+   * micTrackPathFor, when given, its Mic Track path.
    */
   createSession(
     startedAt: string,
     desktopTrackPathFor: (id: number) => string,
     micTrackPathFor?: (id: number) => string,
+    { status = 'recording', name = null, imported = false }: NewSessionOptions = {},
   ): Session {
     this.db.exec('BEGIN');
     try {
       const id = Number(
         this.db
           .prepare(
-            "INSERT INTO sessions (started_at, status, desktop_track_path) VALUES (?, 'recording', '')",
+            "INSERT INTO sessions (started_at, status, desktop_track_path, name, imported) VALUES (?, ?, '', ?, ?)",
           )
-          .run(startedAt).lastInsertRowid,
+          .run(startedAt, status, name, imported ? 1 : 0).lastInsertRowid,
       );
       this.db
         .prepare('UPDATE sessions SET desktop_track_path = ?, mic_track_path = ? WHERE id = ?')
@@ -287,11 +381,146 @@ export class Store {
     return this.getSession(id);
   }
 
+  /** Every Session but the Removed ones, newest first. */
   listSessions(): Session[] {
     const rows = this.db
-      .prepare('SELECT * FROM sessions ORDER BY id DESC')
+      .prepare("SELECT * FROM sessions WHERE status <> 'removed' ORDER BY id DESC")
       .all() as unknown as SessionRow[];
     return rows.map(toSession);
+  }
+
+  /** Sets (or with null, clears) a Session's name, recording when, for the Anki export. */
+  renameSession(id: number, name: string | null, at: string): Session {
+    this.db.prepare('UPDATE sessions SET name = ?, renamed_at = ? WHERE id = ?').run(name, at, id);
+    return this.getSession(id);
+  }
+
+  /** Completes an Imported Session once it is imported. */
+  completeImport(id: number, endedAt: string): Session {
+    this.db
+      .prepare("UPDATE sessions SET status = 'completed', ended_at = ? WHERE id = ? AND status = 'importing'")
+      .run(endedAt, id);
+    return this.getSession(id);
+  }
+
+  /** Sessions still marked importing, e.g. after the app quit during an import. */
+  importingSessionIds(): number[] {
+    return (
+      this.db.prepare("SELECT id FROM sessions WHERE status = 'importing' ORDER BY id").all() as Array<{ id: number }>
+    ).map((r) => r.id);
+  }
+
+  /** Every audio file a stored Session points to. */
+  audioPaths(): string[] {
+    const rows = this.db.prepare('SELECT desktop_track_path, mic_track_path FROM sessions').all() as Array<{
+      desktop_track_path: string;
+      mic_track_path: string | null;
+    }>;
+    return rows.flatMap((r) => [r.desktop_track_path, r.mic_track_path ?? '']).filter(Boolean);
+  }
+
+  /** The Lemmas heard in this Session and in no other, in the order first heard. */
+  lemmasOnlyIn(sessionId: number): OnlyHeardIn[] {
+    const rows = this.db
+      .prepare(
+        `SELECT l.id AS lemmaId, l.lemma, l.stem_gloss AS stemGloss, l.ignored_at IS NOT NULL AS ignored,
+                (SELECT t.gloss FROM tokens t JOIN utterances tu ON tu.id = t.utterance_id
+                 WHERE t.lemma_id = l.id AND tu.session_id = ?1 AND t.gloss <> ''
+                 ORDER BY tu.start_ms, tu.id, t.position LIMIT 1) AS gloss
+         FROM lemmas l
+         WHERE EXISTS (SELECT 1 FROM occurrences o WHERE o.lemma_id = l.id AND o.session_id = ?1 AND ${heard('o')})
+           AND NOT EXISTS (SELECT 1 FROM occurrences o WHERE o.lemma_id = l.id AND o.session_id <> ?1 AND ${heard('o')})
+         ORDER BY l.first_heard_at, l.id`,
+      )
+      .all(sessionId) as Array<Omit<OnlyHeardIn, 'ignored'> & { ignored: number }>;
+    return rows.map((r) => ({ ...r, ignored: r.ignored === 1 }));
+  }
+
+  /**
+   * Removes a Session and everything it added (ADR 0005, purge): its Transcript,
+   * Occurrences and Session Guide go; Lemmas heard nowhere else leave the Vocabulary with
+   * their surface forms and Word Cards; the rest have their first-heard time and surface
+   * forms recomputed from the Occurrences left. All in one transaction.
+   */
+  purgeSession(id: number): RemovedSession {
+    const session = this.getSession(id);
+    const fed = this.sessionLemmaIds(id);
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('DELETE FROM occurrences WHERE session_id = ?').run(id);
+      this.deleteTranscript(id);
+      this.db.prepare('DELETE FROM session_guides WHERE session_id = ?').run(id);
+      this.db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+      const firstHeard = this.db.prepare('SELECT min(heard_at) AS first FROM occurrences WHERE lemma_id = ?');
+      const kept: number[] = [];
+      for (const lemmaId of fed) {
+        const { first } = firstHeard.get(lemmaId) as { first: string | null };
+        if (first === null) {
+          for (const sql of [
+            "UPDATE tokens SET lemma_id = NULL, gloss = '' WHERE lemma_id = ?",
+            'DELETE FROM surface_forms WHERE lemma_id = ?',
+            'DELETE FROM word_cards WHERE lemma_id = ?',
+            'DELETE FROM lemmas WHERE id = ?',
+          ]) {
+            this.db.prepare(sql).run(lemmaId);
+          }
+          continue;
+        }
+        kept.push(lemmaId);
+        this.db.prepare('UPDATE lemmas SET first_heard_at = ? WHERE id = ?').run(first, lemmaId);
+        this.db
+          .prepare(
+            `DELETE FROM surface_forms WHERE lemma_id = ?1
+             AND surface NOT IN (SELECT surface FROM occurrences WHERE lemma_id = ?1)`,
+          )
+          .run(lemmaId);
+        this.db
+          .prepare(
+            `UPDATE surface_forms SET first_heard_at = (
+               SELECT min(o.heard_at) FROM occurrences o
+               WHERE o.lemma_id = surface_forms.lemma_id AND o.surface = surface_forms.surface)
+             WHERE lemma_id = ?`,
+          )
+          .run(lemmaId);
+      }
+      this.db.exec('COMMIT');
+      return { audio: { desktopTrackPath: session.desktopTrackPath, micTrackPath: session.micTrackPath }, lemmaIds: kept };
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /**
+   * Removes a Session but keeps its words (ADR 0005): it becomes a Removed Session, with
+   * its name and start time, no audio and no Transcript, and its Occurrences point at it
+   * instead of an Utterance, so every Lemma it fed is unchanged. All in one transaction.
+   */
+  tombstoneSession(id: number): RemovedSession {
+    const session = this.getSession(id);
+    const fed = this.sessionLemmaIds(id);
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('UPDATE occurrences SET utterance_id = NULL WHERE session_id = ?').run(id);
+      this.deleteTranscript(id);
+      this.db.prepare('DELETE FROM session_guides WHERE session_id = ?').run(id);
+      this.db
+        .prepare("UPDATE sessions SET status = 'removed', desktop_track_path = '', mic_track_path = NULL WHERE id = ?")
+        .run(id);
+      this.db.exec('COMMIT');
+      return { audio: { desktopTrackPath: session.desktopTrackPath, micTrackPath: session.micTrackPath }, lemmaIds: fed };
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /** Deletes a Session's Utterances and their Tokens, once no Occurrence points at them. */
+  private deleteTranscript(sessionId: number): void {
+    this.db
+      .prepare('DELETE FROM tokens WHERE utterance_id IN (SELECT id FROM utterances WHERE session_id = ?)')
+      .run(sessionId);
+    this.db.prepare('DELETE FROM utterances WHERE session_id = ?').run(sessionId);
   }
 
   /** Stores a final Utterance and its Tokens together; returns the Utterance's id. */
@@ -340,10 +569,11 @@ export class Store {
    * Vocabulary (ADR 0004), so one is refused.
    */
   recordHeardWords(utteranceId: number, heardAt: string, words: HeardWord[]): number[] {
-    const heardOn = this.db.prepare('SELECT track FROM utterances WHERE id = ?').get(utteranceId) as
-      | { track: Track }
+    const heardOn = this.db.prepare('SELECT track, session_id FROM utterances WHERE id = ?').get(utteranceId) as
+      | { track: Track; session_id: number }
       | undefined;
-    if (heardOn?.track === 'mic') throw new Error(`Utterance ${utteranceId} is a Learner Utterance`);
+    if (!heardOn) throw new Error(`Utterance ${utteranceId} not found`);
+    if (heardOn.track === 'mic') throw new Error(`Utterance ${utteranceId} is a Learner Utterance`);
     const upsertLemma = this.db.prepare(
       `INSERT INTO lemmas (lemma, root, part_of_speech, stem_gloss, pattern, first_heard_at)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -364,7 +594,8 @@ export class Store {
          pronunciation = coalesce(pronunciation, excluded.pronunciation)`,
     );
     const addOccurrence = this.db.prepare(
-      'INSERT INTO occurrences (lemma_id, utterance_id, position, surface) VALUES (?, ?, ?, ?)',
+      `INSERT INTO occurrences (lemma_id, session_id, utterance_id, position, surface, heard_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     );
     const linkToken = this.db.prepare(
       'UPDATE tokens SET lemma_id = ? WHERE utterance_id = ? AND position = ? AND lemma_id IS NULL',
@@ -382,7 +613,7 @@ export class Store {
           heardAt,
         ) as { id: number };
         addSurface.run(row.id, w.surface, heardAt, row.id, a.diacritized ?? null, a.pronunciation ?? null);
-        addOccurrence.run(row.id, utteranceId, position, w.surface);
+        addOccurrence.run(row.id, heardOn.session_id, utteranceId, position, w.surface, heardAt);
         if (w.tokenPosition !== null) linkToken.run(row.id, utteranceId, w.tokenPosition);
         return row.id;
       });
@@ -398,8 +629,9 @@ export class Store {
   listVocabulary(): VocabularyEntry[] {
     const lemmas = this.db
       .prepare(
-        `SELECT l.*, (SELECT count(*) FROM occurrences o JOIN utterances u ON u.id = o.utterance_id
-                 WHERE o.lemma_id = l.id AND u.track = 'desktop') AS count
+        `SELECT l.*, (SELECT count(*) FROM occurrences o WHERE o.lemma_id = l.id AND ${heard('o')}) AS count,
+                (SELECT s.status = 'removed' FROM occurrences o JOIN sessions s ON s.id = o.session_id
+                 WHERE o.lemma_id = l.id AND ${heard('o')} ORDER BY o.heard_at, o.id LIMIT 1) AS first_removed
          FROM lemmas l ORDER BY l.first_heard_at DESC, l.id DESC`,
       )
       .all() as unknown as LemmaRow[];
@@ -411,12 +643,11 @@ export class Store {
     const heardIn = new Map<number, HeardIn[]>();
     const heardRows = this.db
       .prepare(
-        `SELECT DISTINCT o.lemma_id, u.session_id, o.utterance_id
-         FROM occurrences o JOIN utterances u ON u.id = o.utterance_id
-         WHERE u.track = 'desktop'
-         ORDER BY o.lemma_id, o.utterance_id`,
+        `SELECT DISTINCT o.lemma_id, o.session_id, o.utterance_id
+         FROM occurrences o WHERE ${heard('o')}
+         ORDER BY o.lemma_id, o.session_id, o.utterance_id`,
       )
-      .all() as unknown as Array<{ lemma_id: number; session_id: number; utterance_id: number }>;
+      .all() as unknown as Array<{ lemma_id: number; session_id: number; utterance_id: number | null }>;
     for (const r of heardRows) {
       const list = heardIn.get(r.lemma_id) ?? [];
       list.push({ sessionId: r.session_id, utteranceId: r.utterance_id });
@@ -433,6 +664,7 @@ export class Store {
       count: l.count,
       heardIn: heardIn.get(l.id) ?? [],
       ignored: l.ignored_at !== null,
+      firstHeardInRemoved: l.first_removed === 1,
     }));
   }
 
@@ -462,8 +694,7 @@ export class Store {
   getLemma(lemmaId: number): LemmaRecord | undefined {
     const l = this.db
       .prepare(
-        `SELECT l.*, (SELECT count(*) FROM occurrences o JOIN utterances u ON u.id = o.utterance_id
-                 WHERE o.lemma_id = l.id AND u.track = 'desktop') AS count
+        `SELECT l.*, (SELECT count(*) FROM occurrences o WHERE o.lemma_id = l.id AND ${heard('o')}) AS count
          FROM lemmas l WHERE l.id = ?`,
       )
       .get(lemmaId) as unknown as (LemmaRow & { pattern: string | null }) | undefined;
@@ -493,7 +724,7 @@ export class Store {
     return this.db
       .prepare(
         `SELECT u.id AS utteranceId, u.session_id AS sessionId, s.started_at AS sessionStartedAt,
-                u.text, u.translation
+                s.name AS sessionName, u.text, u.translation
          FROM utterances u JOIN sessions s ON s.id = u.session_id
          WHERE u.id IN (SELECT utterance_id FROM occurrences WHERE lemma_id = ?) AND u.track = 'desktop'
          ORDER BY s.started_at DESC, u.session_id DESC, u.start_ms DESC, u.id DESC
@@ -507,13 +738,14 @@ export class Store {
   lemmaSessions(lemmaId: number): HeardSession[] {
     return this.db
       .prepare(
-        `SELECT s.id AS sessionId, s.started_at AS startedAt, count(*) AS count
-         FROM occurrences o JOIN utterances u ON u.id = o.utterance_id JOIN sessions s ON s.id = u.session_id
-         WHERE o.lemma_id = ? AND u.track = 'desktop'
+        `SELECT s.id AS sessionId, s.started_at AS startedAt, s.name AS name, s.renamed_at AS renamedAt,
+                s.status = 'removed' AS removed, count(*) AS count
+         FROM occurrences o JOIN sessions s ON s.id = o.session_id
+         WHERE o.lemma_id = ? AND ${heard('o')}
          GROUP BY s.id ORDER BY s.started_at DESC, s.id DESC`,
       )
       .all(lemmaId)
-      .map((r) => ({ ...r })) as unknown as HeardSession[];
+      .map((r) => ({ ...r, removed: r.removed === 1 })) as unknown as HeardSession[];
   }
 
   /**
@@ -571,8 +803,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          `SELECT DISTINCT o.lemma_id AS id FROM occurrences o JOIN utterances u ON u.id = o.utterance_id
-           WHERE u.session_id = ? AND u.track = 'desktop' ORDER BY o.lemma_id`,
+          `SELECT DISTINCT o.lemma_id AS id FROM occurrences o WHERE o.session_id = ? AND ${heard('o')} ORDER BY o.lemma_id`,
         )
         .all(sessionId) as Array<{ id: number }>
     ).map((r) => r.id);
@@ -594,8 +825,7 @@ export class Store {
          FROM occurrences o JOIN utterances u ON u.id = o.utterance_id JOIN lemmas l ON l.id = o.lemma_id
          WHERE u.session_id = ?1 AND u.track = 'desktop'
            AND NOT EXISTS (
-             SELECT 1 FROM occurrences po JOIN utterances pu ON pu.id = po.utterance_id
-             WHERE po.lemma_id = l.id AND pu.session_id < ?1 AND pu.track = 'desktop')
+             SELECT 1 FROM occurrences po WHERE po.lemma_id = l.id AND po.session_id < ?1 AND ${heard('po')})
          GROUP BY l.id ORDER BY heardOrder, l.id`,
       )
       .all(sessionId)

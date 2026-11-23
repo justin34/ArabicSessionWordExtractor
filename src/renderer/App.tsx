@@ -10,12 +10,15 @@ import type {
   BundleProblem,
   DemoFeed,
   DesktopAudioCapture,
+  ImportStatus,
   ListedSession,
   MicAudioCapture,
   MicRecordingGate,
   MicTranscriptionStatus,
   LiveUtterance,
+  PickedRecording,
   ReadyUpdate,
+  RecordingProbe,
   ReplayLayout,
   Track,
   Unsubscribe,
@@ -24,7 +27,9 @@ import type {
 import { DeviceUnavailableError, NoDesktopAudioError } from './bridge';
 import type { AnkiActions } from './components/AnkiExport';
 import { CreditsView } from './components/CreditsView';
+import { ImportDialog } from './components/ImportDialog';
 import { LiveView } from './components/LiveView';
+import { RemoveDialog } from './components/RemoveDialog';
 import { ReplayPlaceholder } from './components/ReplayPlaceholder';
 import { SessionList } from './components/SessionList';
 import { SessionView, type SessionTab } from './components/SessionView';
@@ -33,6 +38,7 @@ import { Sidebar, type Destination } from './components/Sidebar';
 import { StartPanel } from './components/StartPanel';
 import { VocabularyList } from './components/VocabularyList';
 import { WordCardView } from './components/WordCardView';
+import { formatShortStart } from './format';
 import { isDemoKey, sessionKey } from './sessionKey';
 import { applyUpdate } from './transcript';
 import { useNow } from './useNow';
@@ -49,6 +55,15 @@ export interface AppProps {
   micRecordingGate: MicRecordingGate;
   /** Present only in dev builds; enables the Demo Session. */
   demoFeed?: DemoFeed;
+  /** Tells a picked recording's length before it is imported; unknown (null) by default. */
+  recordingProbe?: RecordingProbe;
+}
+
+const NO_PROBE: RecordingProbe = { durationMs: async () => null };
+
+/** Whether a speech-to-text key is set; unknown (null) keys count as set, so nothing is disabled for nothing. */
+function hasSpeechToTextKey(keys: ApiKeyStatus[] | null): boolean {
+  return keys === null || keys.some((k) => (k.name === 'soniox' || k.name === 'deepgram') && k.source !== null);
 }
 
 type Route =
@@ -88,7 +103,15 @@ function sortNewestFirst(list: ListedSession[]): ListedSession[] {
   );
 }
 
-export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate, demoFeed }: AppProps) {
+export function App({
+  bridge,
+  capture,
+  micCapture,
+  audioInputs,
+  micRecordingGate,
+  demoFeed,
+  recordingProbe = NO_PROBE,
+}: AppProps) {
   const [route, setRoute] = useState<Route>({ name: 'sessions' });
   const [realSessions, setRealSessions] = useState<ListedSession[]>([]);
   const [demoSessions, setDemoSessions] = useState<ListedSession[]>([]);
@@ -121,6 +144,16 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
   const [micTranscriptions, setMicTranscriptions] = useState<Record<number, MicTranscriptionStatus>>({});
   /** Bumped when a Session's stored Transcript changes, so Replay loads it again. */
   const [transcriptVersions, setTranscriptVersions] = useState<Record<number, number>>({});
+  /** How each import running is going, by Session id. */
+  const [imports, setImports] = useState<Record<number, ImportStatus>>({});
+  /** A recording picked to import, while its name is asked for. */
+  const [importDraft, setImportDraft] = useState<PickedRecording | null>(null);
+  /** Which API keys are set, for "Import recording"; null until loaded. */
+  const [listKeys, setListKeys] = useState<ApiKeyStatus[] | null>(null);
+  /** The Session the remove dialog is open for. */
+  const [removing, setRemoving] = useState<ListedSession | null>(null);
+  /** "Removed …", once a Session is removed. */
+  const [removedNotice, setRemovedNotice] = useState<string | null>(null);
   const active = useRef<ActiveRecording | null>(null);
   const starting = useRef(false);
   const demoCancels = useRef(new Map<number, Unsubscribe>());
@@ -129,12 +162,49 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
   const sessions = sortNewestFirst([...demoSessions, ...realSessions]);
 
   const refresh = useCallback(async () => {
-    setRealSessions(await bridge.listSessions());
+    const list = await bridge.listSessions();
+    setRealSessions(list);
+    // An import that began before this window loaded (or before it last listed) says how it is going.
+    for (const s of list.filter((x) => x.status === 'importing')) {
+      bridge
+        .importStatus(s.id)
+        .then((status) => status && setImports((m) => (m[s.id] ? m : { ...m, [s.id]: status })))
+        .catch(() => undefined);
+    }
   }, [bridge]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // The import runs in the main process; it reports however the learner moves around.
+  useEffect(
+    () =>
+      bridge.subscribeImports((sessionId, status) => {
+        if (status.state === 'running') {
+          setImports((m) => ({ ...m, [sessionId]: status }));
+          return;
+        }
+        setImports(({ [sessionId]: _, ...rest }) => rest);
+        if (status.state === 'failed') setNotice(`Could not import “${status.name}”: ${status.message}`);
+        void refresh().catch(() => undefined);
+      }),
+    [bridge, refresh],
+  );
+
+  // Keys can change in Settings, so they are read each time the Session List shows.
+  const onSessionList = route.name === 'sessions';
+  useEffect(() => {
+    if (!onSessionList) return;
+    let current = true;
+    bridge
+      .apiKeys()
+      .then((keys) => current && setListKeys(keys))
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [bridge, onSessionList]);
 
   useEffect(() => {
     let current = true;
@@ -465,6 +535,8 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
       status: 'recording',
       desktopTrackPath: '',
       micTrackPath: null,
+      name: null,
+      imported: false,
       isDemo: true,
     };
     setDemoSessions((list) => [...list, demo]);
@@ -476,6 +548,7 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
   }
 
   function openSession(s: ListedSession): void {
+    if (s.status === 'importing') return;
     setRoute(
       s.status === 'recording'
         ? { name: 'live', sessionKey: sessionKey(s) }
@@ -493,6 +566,67 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
       .audioSettings()
       .then(setStartDevices)
       .catch(() => setStartDevices(SYSTEM_AUDIO));
+  }
+
+  /** Picks a recording, then asks for its name (ImportDialog). */
+  async function pickRecording(): Promise<void> {
+    setNotice(null);
+    try {
+      const picked = await bridge.pickRecording();
+      if (picked) setImportDraft(picked);
+    } catch (err) {
+      setNotice((err as Error).message || String(err));
+    }
+  }
+
+  /** Imports the picked recording in the main process; its row shows at once, marked importing. */
+  async function importRecording(draft: PickedRecording, name: string | null): Promise<void> {
+    setImportDraft(null);
+    try {
+      const durationMs = await recordingProbe.durationMs(bridge.pickedRecordingUrl(draft.token)).catch(() => null);
+      await bridge.importRecording(draft.token, name, durationMs);
+    } catch (err) {
+      setNotice(`Could not import the recording: ${(err as Error).message}`);
+    }
+    await refresh();
+  }
+
+  function cancelImport(s: ListedSession): void {
+    bridge
+      .cancelImport(s.id)
+      .catch((err: Error) => setNotice(`Could not cancel the import: ${err.message}`))
+      .finally(() => void refresh());
+  }
+
+  /** Renames a completed Session, from its row or its header. */
+  function renameSession(s: ListedSession, name: string | null): void {
+    bridge
+      .renameSession(s.id, name)
+      .then((renamed) => {
+        setRealSessions((list) => list.map((x) => (x.id === renamed.id ? renamed : x)));
+        setRoute((r) => (r.name === 'replay' && r.session.id === renamed.id ? { ...r, session: renamed } : r));
+      })
+      .catch((err: Error) => setNotice(`Could not rename the Session: ${err.message}`));
+  }
+
+  /** A completed Session can be removed unless its mic transcription is running. */
+  const canRemove = (s: ListedSession) =>
+    !s.isDemo && s.status === 'completed' && micTranscriptions[s.id]?.state !== 'running';
+
+  /** Removes a Session from the remove dialog; afterwards the Session List shows. */
+  async function removeSession(s: ListedSession, keepWords: boolean): Promise<void> {
+    setRemoving(null);
+    setNotice(null);
+    // Replay's player stops before its files are deleted.
+    setRoute({ name: 'sessions' });
+    try {
+      await bridge.removeSession(s.id, keepWords);
+      setRemovedNotice(s.name ? `Removed “${s.name}”` : `Removed the Session of ${formatShortStart(s.startedAt)}`);
+      setIgnoreVersion((v) => v + 1);
+    } catch (err) {
+      setNotice(`Could not remove the Session: ${(err as Error).message}`);
+    }
+    await refresh();
   }
 
   // "Restart to update" never shows while a Session records, in this window or another.
@@ -528,6 +662,8 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
   const saveApiKey = useCallback((name: ApiKeyName, key: string | null) => bridge.saveApiKey(name, key), [bridge]);
   const checkApiKey = useCallback((name: ApiKeyName) => bridge.checkApiKey(name), [bridge]);
   const loadDictionaryNotice = useCallback(() => bridge.dictionaryNotice(), [bridge]);
+  const loadRemovalPreview = useCallback((sessionId: number) => bridge.removalPreview(sessionId), [bridge]);
+  const importing = realSessions.some((s) => s.status === 'importing');
   const anki = useMemo<AnkiActions>(
     () => ({
       exportToAnki: (target) => bridge.exportToAnki(target),
@@ -589,6 +725,14 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
             </button>
           </div>
         )}
+        {removedNotice && route.name === 'sessions' && (
+          <div className="notice notice--info" role="status" aria-label="Removed Session">
+            <span dir="auto">{removedNotice}</span>
+            <button type="button" className="btn btn--link" onClick={() => setRemovedNotice(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
         {route.name === 'sessions' && (
           <SessionList
             sessions={sessions}
@@ -597,6 +741,18 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
             onStart={openStartPanel}
             startDisabled={activeId !== null}
             onStartDemo={demoFeed ? startDemo : undefined}
+            imports={imports}
+            actions={{
+              onRename: renameSession,
+              onRemove: setRemoving,
+              canRemove,
+              onCancelImport: cancelImport,
+            }}
+            importOffer={{
+              onImport: () => void pickRecording(),
+              disabledBecause: !hasSpeechToTextKey(listKeys) ? 'no-key' : importing ? 'importing' : undefined,
+              onOpenSettings: () => setRoute({ name: 'settings' }),
+            }}
           />
         )}
         {route.name === 'live' && liveSession && (
@@ -635,6 +791,8 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
               onSetIgnored={setIgnored}
               onBack={goSessions}
               anki={anki}
+              onRename={(name) => renameSession(route.session, name)}
+              onRemove={canRemove(route.session) ? () => setRemoving(route.session) : undefined}
             />
           ))}
         {route.name === 'word-card' && (
@@ -670,6 +828,21 @@ export function App({ bridge, capture, micCapture, audioInputs, micRecordingGate
         )}
         {route.name === 'credits' && <CreditsView loadDictionaryNotice={loadDictionaryNotice} />}
       </main>
+      {importDraft && (
+        <ImportDialog
+          suggestedName={importDraft.name}
+          onImport={(name) => void importRecording(importDraft, name)}
+          onCancel={() => setImportDraft(null)}
+        />
+      )}
+      {removing && (
+        <RemoveDialog
+          session={removing}
+          loadPreview={loadRemovalPreview}
+          onRemove={(keepWords) => void removeSession(removing, keepWords)}
+          onCancel={() => setRemoving(null)}
+        />
+      )}
       {startPanelOpen && (
         <StartPanel
           devices={startDevices}

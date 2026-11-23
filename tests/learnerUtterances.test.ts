@@ -258,12 +258,12 @@ describe('Stored Utterances and their Track', () => {
 
       // Were a Learner Utterance's word ever stored as heard, no reader would count it.
       const db = new DatabaseSync(join(dir, 'app.db'));
-      db.prepare('INSERT INTO occurrences (lemma_id, utterance_id, position, surface) VALUES (?, ?, 0, ?)').run(lemmaId, learner, 'كتب');
+      db.prepare("INSERT INTO occurrences (lemma_id, session_id, utterance_id, position, surface, heard_at) VALUES (?, ?, ?, 0, ?, '2026-01-01T10:00:01.000Z')").run(lemmaId, sessionId, learner, 'كتب');
       db.close();
       expect(store.listVocabulary()[0]).toMatchObject({ count: 1, heardIn: [{ sessionId, utteranceId: teacher }] });
       expect(store.getLemma(lemmaId)!.count).toBe(1);
       expect(store.lemmaUtterances(lemmaId, 5).map((u) => u.translation)).toEqual(['He wrote.']);
-      expect(store.lemmaSessions(lemmaId)).toEqual([{ sessionId, startedAt: '2026-01-01T10:00:00.000Z', count: 1 }]);
+      expect(store.lemmaSessions(lemmaId)).toEqual([{ sessionId, startedAt: '2026-01-01T10:00:00.000Z', name: null, renamedAt: null, removed: false, count: 1 }]);
       expect(store.sessionLemmaIds(sessionId)).toEqual([lemmaId]);
       expect(store.newLemmasInSession(sessionId).map((l) => l.count)).toEqual([1]);
       const note = await ankiNote(store, new FakeDictionary({}), lemmaId);

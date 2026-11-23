@@ -1,4 +1,8 @@
-export type SessionStatus = 'recording' | 'completed';
+/**
+ * `importing`: an Imported Session still being transcribed and analyzed. `removed`: a
+ * Removed Session (ADR 0005), a tombstone hidden from the Session List.
+ */
+export type SessionStatus = 'recording' | 'completed' | 'importing' | 'removed';
 
 export interface Session {
   id: number;
@@ -8,7 +12,14 @@ export interface Session {
   desktopTrackPath: string;
   /** The optional Mic Track, chosen at Session start; transcribed only when asked. Null without one. */
   micTrackPath: string | null;
+  /** The Session name (GLOSSARY); null when unnamed, shown by its start date. */
+  name: string | null;
+  /** An Imported Session: made from an audio or video file, not recorded. */
+  imported: boolean;
 }
+
+/** The longest Session name, in characters. */
+export const MAX_SESSION_NAME = 100;
 
 /**
  * Which audio track an Utterance was heard on (ADR 0004): the Desktop Track (the teacher,
@@ -62,10 +73,10 @@ export interface LiveUtterance {
   startMs?: number;
 }
 
-/** Where a Lemma was heard: one Utterance of one Session. */
+/** Where a Lemma was heard: one Utterance of one Session; no Utterance in a Removed Session. */
 export interface HeardIn {
   sessionId: number;
-  utteranceId: number;
+  utteranceId: number | null;
 }
 
 /** One Lemma in the Vocabulary (ADR 0001), with the surface forms it was heard as. */
@@ -85,6 +96,8 @@ export interface VocabularyEntry {
   heardIn: HeardIn[];
   /** An Ignored Lemma (GLOSSARY): kept out of Session Guides and Anki exports. */
   ignored: boolean;
+  /** True when it was first heard in a Removed Session; absent means false. */
+  firstHeardInRemoved?: boolean;
 }
 
 /** An audio input device as the system lists it; the label is kept to name it when unplugged. */
@@ -145,6 +158,39 @@ export type MicTranscriptionStatus =
   | { state: 'running'; note: string }
   | { state: 'failed'; message: string }
   | { state: 'done' };
+
+/**
+ * An Imported Session's import: `running` with a progress note; `failed` with why (its
+ * Session is gone); `done` once it is completed; `cancelled` once Cancel has removed it.
+ */
+export type ImportStatus =
+  | { state: 'running'; note: string }
+  | { state: 'failed'; message: string; name: string }
+  | { state: 'done' }
+  | { state: 'cancelled' };
+
+export type ImportListener = (sessionId: number, status: ImportStatus) => void;
+
+/** A recording file the learner picked to import, before it is imported. */
+export interface PickedRecording {
+  /** Names the picked file to the main process; the renderer never sees its path. */
+  token: string;
+  /** The file name without its extension, the suggested Session name. */
+  name: string;
+}
+
+/** A word that leaves the Vocabulary when its Session is removed without keeping its words. */
+export interface RemovalWord {
+  lemmaId: number;
+  lemma: string;
+  gloss: string;
+  ignored: boolean;
+}
+
+/** What the remove dialog shows: the Lemmas heard in no other Session. */
+export interface RemovalPreview {
+  words: RemovalWord[];
+}
 
 export type MicTranscriptionListener = (sessionId: number, status: MicTranscriptionStatus) => void;
 

@@ -1,0 +1,38 @@
+.remove-dialog__words {
+  max-height: 12rem;
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  list-style: none;
+}
+.remove-dialog__word {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding-block: var(--space-1);
+}
+.remove-dialog__lemma {
+  font-family: var(--font-arabic);
+  font-size: var(--text-lg);
+}
+.remove-dialog__gloss {
+  flex: 1;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-block: var(--space-4);
+}
+.modal__field input {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}

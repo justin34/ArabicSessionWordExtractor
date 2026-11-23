@@ -9,6 +9,15 @@ import type { AnkiExportTarget } from '../types';
 import { ankiNote, localDate } from './notes';
 import { ankiPackage, FONT_FILE, type AnkiMedia, type AnkiNote } from './package';
 
+/** A name as part of a Windows file name: without the characters Windows forbids, nor trailing dots. */
+export function fileNamePart(name: string): string {
+  return name
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/, '')
+    .trim();
+}
+
 export interface AnkiExporterOptions {
   /** The Arabic font the cards show the Lemma in, packaged with the deck when it exists. */
   fontPath?: string;
@@ -43,10 +52,12 @@ export class AnkiExporter {
     return guide?.groups.flatMap((g) => g.words.map((w) => w.lemmaId)) ?? [];
   }
 
-  /** The Save dialog's suggested file name. */
+  /** The Save dialog's suggested file name: a named Session's is its name. */
   defaultFileName(target: AnkiExportTarget): string {
     if (target.kind === 'vocabulary') return `arabic-vocabulary-${localDate(this.now())}.apkg`;
-    return `session-${localDate(this.store.getSession(target.sessionId).startedAt)}-new-words.apkg`;
+    const session = this.store.getSession(target.sessionId);
+    const name = session.name ? fileNamePart(session.name) : '';
+    return name ? `${name} - new words.apkg` : `session-${localDate(session.startedAt)}-new-words.apkg`;
   }
 
   /** The notes an export holds. */

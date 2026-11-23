@@ -4,7 +4,7 @@ import { alignToTokens, cleanSurface, hasArabicWord, isArabicWord, isWord } from
 import { AudioChannel } from './audioChannel';
 import { quickGloss } from './dictionary/gloss';
 import type { StudyGuideHooks } from './guides/studyGuides';
-import type { DictionaryEntry, Providers, TokenAnalysis } from './providers';
+import type { DictionaryEntry, Providers, SttEvent, TokenAnalysis } from './providers';
 import type { HeardWord, Store } from './store';
 import type {
   LiveUtterance,
@@ -50,6 +50,8 @@ interface FinalUtterance {
   /** Wall-clock time the Utterance was final: when its words count as heard. */
   heardAt: string;
   current: LiveUtterance;
+  /** An Imported Session's: nothing is streamed to Live View. */
+  silent?: boolean;
 }
 
 /** How long analysis waits for an Utterance's translation before going on without it. */
@@ -204,6 +206,47 @@ export class Sessions {
       await this.stop(id);
     }
     return this.store.getSession(id);
+  }
+
+  /**
+   * Stores one Utterance of an Imported Session's recording, then translates and analyzes
+   * it as a live Session's, settling once both have (never rejecting for either). Its
+   * words count as heard at `heardAt`.
+   */
+  async addRecordedUtterance(sessionId: number, event: SttEvent, heardAt: string): Promise<void> {
+    const tokens: Token[] = (event.words ?? []).map((w) => ({
+      surface: w.text,
+      startMs: w.startMs,
+      endMs: w.endMs,
+      gloss: '',
+      lemmaId: null,
+    }));
+    const utteranceId = this.store.addUtterance({
+      sessionId,
+      text: event.text,
+      translation: '',
+      startMs: event.startMs,
+      endMs: event.endMs,
+      tokens,
+      track: 'desktop',
+    });
+    if (!hasArabicWord(event.text)) return;
+    const utterance: FinalUtterance = {
+      sessionId,
+      utteranceId,
+      heardAt,
+      silent: true,
+      current: { id: String(utteranceId), isFinal: true, text: event.text, translation: '', tokens, startMs: event.startMs },
+    };
+    const translated = this.translate(utterance);
+    await Promise.all([translated, this.analyze(utterance, translated)]);
+  }
+
+  /** Completes an Imported Session once its Utterances are in, and generates its Session Guide. */
+  async completeImported(sessionId: number, endedAt: string): Promise<Session> {
+    const session = this.store.completeImport(sessionId, endedAt);
+    await this.guides?.sessionEnded(sessionId);
+    return session;
   }
 
   /** Receives every live Transcript update, for every recording Session. */
@@ -361,7 +404,7 @@ export class Sessions {
   /** Sends a final Utterance again with what has filled in since. */
   private update(u: FinalUtterance, change: Partial<LiveUtterance>): void {
     u.current = { ...u.current, ...change };
-    this.emit(u.sessionId, u.current);
+    if (!u.silent) this.emit(u.sessionId, u.current);
   }
 
   /**

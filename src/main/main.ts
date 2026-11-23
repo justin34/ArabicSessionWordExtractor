@@ -1,4 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, protocol, safeStorage, session, shell } from 'electron';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -12,8 +13,9 @@ import { isApiKeyName, isReplayLayout, parseApiKey, parseAudioSettings, type Sec
 import { SqliteDictionary } from '../core/dictionary/sqlite';
 import type { ArabicAnalyzer, Dictionary } from '../core/providers';
 import { DEV_DATA_FOLDER } from '../core/appIdentity';
+import { IMPORT_FORMATS, importRefusal, suggestedName } from '../core/recordingImport';
 import { analyzerFallback, checkBundle, dictionaryFallback, type Fallback } from '../core/bundle';
-import type { AnkiExportResult, AnkiExportTarget, BundleProblem, ReadyUpdate } from '../core/types';
+import { MAX_SESSION_NAME, type AnkiExportResult, type AnkiExportTarget, type BundleProblem, type PickedRecording, type ReadyUpdate } from '../core/types';
 
 const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
 
@@ -169,7 +171,22 @@ function requireKeyName(value: unknown) {
   return value;
 }
 
-function registerIpc({ sessions, micTranscriptions, vocabulary, words, guides, anki, settings, apiKeys }: App): void {
+/** A Session name from the renderer: a string of at most the limit, or null to unname. */
+function requireSessionName(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || [...value.trim()].length > MAX_SESSION_NAME) throw new Error('Invalid Session name');
+  return value;
+}
+
+/** A recording's length in ms as the renderer measured it; null when it could not. */
+function optionalDurationMs(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** Recordings picked to import this run, by token; the renderer never sees their paths. */
+const pickedRecordings = new Map<string, string>();
+
+function registerIpc({ sessions, micTranscriptions, imports, library, vocabulary, words, guides, anki, settings, apiKeys }: App): void {
   // Every window hears every live Session; the renderer picks the one it shows.
   sessions.subscribe((sessionId, update) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -197,6 +214,48 @@ function registerIpc({ sessions, micTranscriptions, vocabulary, words, guides, a
   ipcMain.handle('micTranscription:start', (_event, id: unknown, options: unknown) =>
     micTranscriptions.start(requireSessionId(id), { gated: (options as { gated?: unknown } | undefined)?.gated === true }),
   );
+  // Import a recording: picked here, imported here in the background, whatever screen is open.
+  imports.subscribe((sessionId, status) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('imports:status', sessionId, status);
+    }
+  });
+  ipcMain.handle('imports:pick', async (event): Promise<PickedRecording | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options: Electron.OpenDialogOptions = {
+      title: 'Import a recording',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Audio or video', extensions: Object.keys(IMPORT_FORMATS).map((e) => e.slice(1)) },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    };
+    const choice = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    const path = choice.filePaths[0];
+    if (choice.canceled || !path) return null;
+    const refused = importRefusal(path);
+    if (refused) throw new Error(refused);
+    const token = randomUUID();
+    pickedRecordings.set(token, path);
+    return { token, name: suggestedName(path) };
+  });
+  ipcMain.handle('imports:start', (_event, token: unknown, name: unknown, durationMs: unknown) => {
+    const path = typeof token === 'string' ? pickedRecordings.get(token) : undefined;
+    if (!path) throw new Error('Pick the recording again.');
+    const session = imports.start(path, requireSessionName(name), optionalDurationMs(durationMs));
+    pickedRecordings.delete(token as string);
+    return session;
+  });
+  ipcMain.handle('imports:status', (_event, id: unknown) => imports.status(requireSessionId(id)));
+  ipcMain.handle('imports:cancel', (_event, id: unknown) => imports.cancel(requireSessionId(id)));
+  ipcMain.handle('sessions:rename', (_event, id: unknown, name: unknown) =>
+    library.rename(requireSessionId(id), requireSessionName(name)),
+  );
+  ipcMain.handle('sessions:removalPreview', (_event, id: unknown) => library.removalPreview(requireSessionId(id)));
+  ipcMain.handle('sessions:remove', (_event, id: unknown, keepWords: unknown) => {
+    if (typeof keepWords !== 'boolean') throw new Error('Expected whether to keep the words');
+    library.remove(requireSessionId(id), { keepWords });
+  });
   ipcMain.handle('sessions:transcriptionFailure', (_event, id: unknown, track: unknown) =>
     sessions.transcriptionFailure(requireSessionId(id), track === 'mic' ? 'mic' : 'desktop') ?? null,
   );
@@ -296,6 +355,12 @@ protocol.registerSchemesAsPrivileged([
 function serveSessionAudio({ sessions }: App): void {
   protocol.handle(AUDIO_SCHEME, (request) => {
     const url = new URL(request.url);
+    // A recording picked to import, so the renderer can tell how long it is.
+    if (url.hostname === 'import') {
+      const picked = pickedRecordings.get(url.pathname.replace(/^\//, ''));
+      if (!picked) return new Response('No such recording', { status: 404 });
+      return audioFileResponse(picked, request.headers.get('range'));
+    }
     const id = Number(url.pathname.replace(/^\//, ''));
     const valid = Number.isInteger(id) && id > 0;
     const path = !valid
@@ -430,7 +495,8 @@ void app.whenReady().then(() => {
  */
 let shuttingDown: Promise<void> | undefined;
 function shutDown(): Promise<void> {
-  shuttingDown ??= (core?.sessions.stopAll() ?? Promise.resolve())
+  // An import running is abandoned: it leaves no Session and no copied file.
+  shuttingDown ??= Promise.all([core?.sessions.stopAll(), core?.imports.abandon()])
     .then(() => core?.guides.idle())
     .then(() => analyzer?.close())
     .finally(() => {

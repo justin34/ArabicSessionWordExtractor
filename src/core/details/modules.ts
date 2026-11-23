@@ -94,6 +94,12 @@ function sessionLabel(startedAt: string): string {
   return new Date(startedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+/** A Session as "Heard in" names it: by its name, else its start; a Removed Session says so. */
+function heardInLabel(s: { startedAt: string; name: string | null; removed?: boolean }): string {
+  if (!s.removed) return s.name ?? sessionLabel(s.startedAt);
+  return s.name ? `${s.name} (removed Session)` : `Removed Session (${sessionLabel(s.startedAt)})`;
+}
+
 const times = (n: number) => (n === 1 ? 'once' : `${n} times`);
 
 /** Dictionary form, the form heard, part of speech, root and pattern, from the analyzer. */
@@ -186,7 +192,7 @@ function ownExamplesModule({ store }: DetailSources): DetailModule {
           examples: heard.map((u) => ({
             arabic: u.text,
             english: u.translation,
-            note: sessionLabel(u.sessionStartedAt),
+            note: u.sessionName ?? sessionLabel(u.sessionStartedAt),
           })),
         },
       ];
@@ -205,7 +211,7 @@ function sessionsModule({ store }: DetailSources): DetailModule {
       return [
         {
           kind: 'list',
-          items: sessions.map((s) => ({ text: sessionLabel(s.startedAt), note: `heard ${times(s.count)}` })),
+          items: sessions.map((s) => ({ text: heardInLabel(s), note: `heard ${times(s.count)}` })),
         },
       ];
     },

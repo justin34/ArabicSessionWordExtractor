@@ -155,6 +155,15 @@ export const CREDITS: CreditGroup[] = [
         files: ['flaticon-arabic-icon.txt'],
         note: 'Arabic icons created by Magnific - Flaticon.',
       },
+      {
+        name: 'Trash can icon',
+        use: 'The button that removes a Session. Like the app’s icon, not under an open licence.',
+        by: 'DinosoftLabs - Flaticon',
+        licence: 'Flaticon free licence (with attribution)',
+        url: 'https://www.flaticon.com/free-icons/trash-can',
+        files: ['flaticon-trash-can-icon.txt'],
+        note: 'Trash can icons created by DinosoftLabs - Flaticon.',
+      },
     ],
   },
   {

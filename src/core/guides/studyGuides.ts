@@ -84,6 +84,14 @@ export class StudyGuides implements StudyGuideHooks {
     this.inBackground(() => this.buildWordCards(this.store.sessionLemmaIds(sessionId), true));
   }
   /**
+   * Rebuilds these Lemmas' Word Cards in the background, e.g. after a Session they were
+   * heard in was removed; a Lemma no longer in the Vocabulary is skipped.
+   */
+  rebuildWordCards(lemmaIds: number[]): void {
+    this.inBackground(() => this.buildWordCards(lemmaIds, true));
+  }
+
+  /**
    * Gives every Lemma without a Word Card and every completed Session without a Session
    * Guide theirs, e.g. for data from before study guides existed or a Session a crash ended.
    */

@@ -823,10 +823,9 @@ describe('Foreign words', () => {
       .prepare("INSERT INTO lemmas (lemma, part_of_speech, first_heard_at) VALUES ('Zoom', 'noun', ?) RETURNING id")
       .get(at) as { id: number };
     db.prepare("INSERT INTO surface_forms (lemma_id, surface, first_heard_at, seq) VALUES (?, 'Zoom', ?, 0)").run(zoom.id, at);
-    db.prepare("INSERT INTO occurrences (lemma_id, utterance_id, position, surface) VALUES (?, ?, 99, 'Zoom')").run(
-      zoom.id,
-      utteranceId,
-    );
+    db.prepare(
+      "INSERT INTO occurrences (lemma_id, session_id, utterance_id, position, surface, heard_at) VALUES (?, ?, ?, 99, 'Zoom', ?)",
+    ).run(zoom.id, s.id, utteranceId, at);
     db.prepare("UPDATE tokens SET lemma_id = ?, gloss = 'Zoom' WHERE utterance_id = ? AND position = 1").run(
       zoom.id,
       utteranceId,

@@ -15,6 +15,8 @@ When the recording stops, the app keeps it: you can replay the audio and follow 
 - **Study guides.** Each word gets a Word Card. Each recording gets a Session Guide that lists the words new to you, grouped by part of speech.
 - **Replay.** Play a past Session while the current word is highlighted. Click a sentence to jump to it.
 - **Optional microphone track.** Record your own voice too, as a separate track that plays back in sync. Ask for it to be transcribed and Live View shows what you said, marked **You** and translated, but never added to your vocabulary.
+- **Import a recording.** Turn an audio or video file you already have (mp3, m4a, wav, ogg, webm, mp4 and similar) into a Session. It is transcribed and studied like one you recorded.
+- **Name and remove Sessions.** Give a Session a name, such as "Lesson 4". Remove one you no longer need, either with the words it added to your Vocabulary or keeping them.
 - **Anki export.** Export your whole Vocabulary, or one Session's new words, as an `.apkg` deck. Importing it again updates the cards rather than duplicating them.
 - **Local and private.** Recordings, transcripts and your Vocabulary stay on your computer. Only the audio (to speech-to-text) and each sentence's text (to translation) are sent out, and only to the services whose keys you enter.
 

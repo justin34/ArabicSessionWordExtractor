@@ -154,7 +154,10 @@ export function VocabularyList({
                 </div>
                 <div className="vocab-row__stats">
                   <div>{heardSummary(e)}</div>
-                  <div className="vocab-row__muted">First heard {formatStart(e.firstHeardAt)}</div>
+                  <div className="vocab-row__muted">
+                    First heard {formatStart(e.firstHeardAt)}
+                    {e.firstHeardInRemoved && ' in a removed Session'}
+                  </div>
                   <div className="vocab-row__ignore">
                     {e.ignored && <Badge kind="ignored">Ignored</Badge>}
                     <button

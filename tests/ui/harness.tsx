@@ -15,10 +15,14 @@ import {
   type Bridge,
   type DemoFeed,
   type DesktopAudioCapture,
+  type ImportStatus,
   type LiveUtterance,
   type MicAudioCapture,
   type MicRecordingGate,
   type MicTranscriptionStatus,
+  type PickedRecording,
+  type RecordingProbe,
+  type RemovalPreview,
   type ReplayLayout,
   type StartOptions,
   type Track,
@@ -33,6 +37,8 @@ export function session(over: Partial<Session> & { id: number }): Session {
     status: 'completed',
     desktopTrackPath: '',
     micTrackPath: null,
+    name: null,
+    imported: false,
     ...over,
   };
 }
@@ -101,6 +107,19 @@ export class FakeBridge implements Bridge {
   micTranscriptionStatuses = new Map<number, MicTranscriptionStatus>();
   micTranscriptionError: Error | null = null;
   gatedMicRecordings = new Map<number, Uint8Array[]>();
+  /** Import a recording: what the Open dialog picks (null: cancelled), or why it refuses. */
+  picked: PickedRecording | null = { token: 'tok-1', name: 'Lesson 4' };
+  pickError: Error | null = null;
+  imported: Array<{ token: string; name: string | null; durationMs: number | null }> = [];
+  importError: Error | null = null;
+  cancelledImports: number[] = [];
+  importStatuses = new Map<number, ImportStatus>();
+  /** Renames and removals asked for; the words each removal preview lists, by Session id. */
+  renames: Array<{ sessionId: number; name: string | null }> = [];
+  removals: Array<{ sessionId: number; keepWords: boolean }> = [];
+  removalPreviews = new Map<number, RemovalPreview>();
+  removeError: Error | null = null;
+  private importListeners = new Set<(sessionId: number, status: ImportStatus) => void>();
   private micTranscriptionListeners = new Set<(sessionId: number, status: MicTranscriptionStatus) => void>();
   private updateListeners = new Set<(update: ReadyUpdate) => void>();
   private listeners = new Map<number, (u: LiveUtterance) => void>();
@@ -162,6 +181,67 @@ export class FakeBridge implements Bridge {
     if (status.state === 'done') this.micTranscriptionStatuses.delete(sessionId);
     else this.micTranscriptionStatuses.set(sessionId, status);
     for (const l of this.micTranscriptionListeners) l(sessionId, status);
+  }
+  async pickRecording() {
+    if (this.pickError) throw this.pickError;
+    return this.picked;
+  }
+  pickedRecordingUrl(token: string) {
+    return `session-audio://import/${token}`;
+  }
+  async importRecording(token: string, name: string | null, durationMs: number | null) {
+    this.imported.push({ token, name, durationMs });
+    if (this.importError) throw this.importError;
+    const s = session({
+      id: this.nextId++,
+      status: 'importing',
+      endedAt: null,
+      startedAt: new Date().toISOString(),
+      name,
+      imported: true,
+    });
+    this.sessions.unshift(s);
+    this.importStatuses.set(s.id, { state: 'running', note: 'Copying the recording…' });
+    return s;
+  }
+  async importStatus(sessionId: number) {
+    return this.importStatuses.get(sessionId) ?? null;
+  }
+  async cancelImport(sessionId: number) {
+    this.cancelledImports.push(sessionId);
+    this.sessions = this.sessions.filter((s) => s.id !== sessionId);
+    this.importStatuses.delete(sessionId);
+  }
+  subscribeImports(onStatus: (sessionId: number, status: ImportStatus) => void) {
+    this.importListeners.add(onStatus);
+    return () => void this.importListeners.delete(onStatus);
+  }
+  /** Plays the main process reporting on an import: a finished one completes, a failed one is gone. */
+  reportImport(sessionId: number, status: ImportStatus) {
+    if (status.state === 'running') this.importStatuses.set(sessionId, status);
+    else this.importStatuses.delete(sessionId);
+    if (status.state === 'done') {
+      this.sessions = this.sessions.map((s) =>
+        s.id === sessionId ? { ...s, status: 'completed', endedAt: new Date().toISOString() } : s,
+      );
+    } else if (status.state !== 'running') {
+      this.sessions = this.sessions.filter((s) => s.id !== sessionId);
+    }
+    for (const l of this.importListeners) l(sessionId, status);
+  }
+  async renameSession(sessionId: number, name: string | null) {
+    this.renames.push({ sessionId, name });
+    const i = this.sessions.findIndex((s) => s.id === sessionId);
+    this.sessions[i] = { ...this.sessions[i], name: name?.trim() || null };
+    return this.sessions[i];
+  }
+  async removalPreview(sessionId: number) {
+    return this.removalPreviews.get(sessionId) ?? { words: [] };
+  }
+  async removeSession(sessionId: number, keepWords: boolean) {
+    this.removals.push({ sessionId, keepWords });
+    if (this.removeError) throw this.removeError;
+    this.sessions = this.sessions.filter((s) => s.id !== sessionId);
   }
   async stopSession(sessionId: number) {
     this.calls.push(`stop:${sessionId}`);
@@ -354,6 +434,16 @@ export class FakeMicRecordingGate implements MicRecordingGate {
   }
 }
 
+/** Says every recording is `ms` long; records each URL asked about. */
+export class FakeRecordingProbe implements RecordingProbe {
+  constructor(public ms: number | null = 5 * 60 * 1000) {}
+  urls: string[] = [];
+  async durationMs(url: string) {
+    this.urls.push(url);
+    return this.ms;
+  }
+}
+
 /** A fixed list of audio inputs. */
 export class FakeAudioInputs implements AudioInputs {
   constructor(public devices: AudioDevice[] = []) {}
@@ -384,6 +474,7 @@ export function renderApp(
     inputs?: FakeAudioInputs;
     demo?: ManualDemoFeed;
     micGate?: FakeMicRecordingGate;
+    probe?: FakeRecordingProbe;
   } = {},
 ) {
   const bridge = opts.bridge ?? new FakeBridge();
@@ -391,6 +482,7 @@ export function renderApp(
   const mic = opts.mic ?? new FakeCapture();
   const inputs = opts.inputs ?? new FakeAudioInputs();
   const micGate = opts.micGate ?? new FakeMicRecordingGate();
+  const probe = opts.probe ?? new FakeRecordingProbe();
   const view = render(
     <App
       bridge={bridge}
@@ -399,7 +491,8 @@ export function renderApp(
       audioInputs={inputs}
       micRecordingGate={micGate}
       demoFeed={opts.demo?.feed}
+      recordingProbe={probe}
     />,
   );
-  return { bridge, capture, mic, inputs, micGate, ...view };
+  return { bridge, capture, mic, inputs, micGate, probe, ...view };
 }

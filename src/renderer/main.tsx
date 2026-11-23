@@ -6,11 +6,12 @@ import type { Bridge, Unsubscribe } from './bridge';
 import { browserAudioInputs, browserDesktopAudio, browserMicAudio } from './browserCapture';
 import { demoFeedForBuild } from './demoFeed';
 import { browserMicRecordingGate } from './micRecordingGate';
+import { browserRecordingProbe } from './recordingProbe';
 import './tokens.css';
 
 type PreloadApi = Omit<
   Bridge,
-  'subscribeTranscript' | 'subscribeTranscriptionFailure' | 'desktopTrackUrl' | 'micTrackUrl'
+  'subscribeTranscript' | 'subscribeTranscriptionFailure' | 'desktopTrackUrl' | 'micTrackUrl' | 'pickedRecordingUrl'
 > & {
   onTranscriptUpdate(listener: TranscriptListener): Unsubscribe;
   onTranscriptionFailure(listener: TranscriptionFailureListener): Unsubscribe;
@@ -23,6 +24,7 @@ const bridge: Bridge = {
   // Served by the main process from the Session's stored Desktop Track.
   desktopTrackUrl: (sessionId) => `session-audio://desktop/${sessionId}`,
   micTrackUrl: (sessionId) => `session-audio://mic/${sessionId}`,
+  pickedRecordingUrl: (token) => `session-audio://import/${token}`,
   subscribeTranscript: (sessionId, onUpdate) =>
     onTranscriptUpdate((id, update) => {
       if (id === sessionId) onUpdate(update);
@@ -41,6 +43,7 @@ createRoot(document.getElementById('root')!).render(
       micCapture={browserMicAudio}
       audioInputs={browserAudioInputs}
       micRecordingGate={browserMicRecordingGate}
+      recordingProbe={browserRecordingProbe}
       demoFeed={demoFeedForBuild(import.meta.env.DEV)}
     />
   </StrictMode>,

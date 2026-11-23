@@ -1,0 +1,42 @@
+.session-name {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.session-name__text {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: text;
+  overflow-wrap: anywhere;
+}
+.session-name__text:hover {
+  text-decoration: underline dotted;
+}
+.session-name__pencil {
+  padding: 0 var(--space-1);
+  border: none;
+  border-radius: var(--radius-1);
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.session-name__pencil:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+.session-name__input {
+  min-width: 12em;
+  max-width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-1);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
